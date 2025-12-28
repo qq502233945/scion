@@ -294,6 +294,16 @@ func TestCloneTemplate(t *testing.T) {
 		}
 	}
 
+	// Verify scion.json template field is updated
+	destTpl := &Template{Name: destName, Path: expectedPath}
+	cfg, err := destTpl.LoadConfig()
+	if err != nil {
+		t.Fatalf("failed to load cloned template config: %v", err)
+	}
+	if cfg.Template != destName {
+		t.Errorf("expected template field to be %s, got %s", destName, cfg.Template)
+	}
+
 	// Test cloning to global
 	globalDestName := "global-dest-tpl"
 	if err := CloneTemplate(srcName, globalDestName, true); err != nil {

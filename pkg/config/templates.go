@@ -139,7 +139,25 @@ func CloneTemplate(srcName, destName string, global bool) error {
 		return fmt.Errorf("template %s already exists at %s", destName, destPath)
 	}
 
-	return util.CopyDir(srcTpl.Path, destPath)
+	if err := util.CopyDir(srcTpl.Path, destPath); err != nil {
+		return err
+	}
+
+	// Update scion.json in destination with the new template name
+	scionPath := filepath.Join(destPath, "scion.json")
+	data, err := os.ReadFile(scionPath)
+	if err == nil {
+		var cfg api.ScionConfig
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			cfg.Template = destName
+			newData, err := json.MarshalIndent(cfg, "", "  ")
+			if err == nil {
+				_ = os.WriteFile(scionPath, newData, 0644)
+			}
+		}
+	}
+
+	return nil
 }
 
 func UpdateDefaultTemplates(global bool) error {
