@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/ptone/scion-agent/pkg/api"
 )
@@ -14,7 +15,26 @@ import (
 var embedsFS embed.FS
 
 func GetDefaultSettingsData() ([]byte, error) {
-	return embedsFS.ReadFile("embeds/default_settings.json")
+	data, err := embedsFS.ReadFile("embeds/default_settings.json")
+	if err != nil {
+		return nil, err
+	}
+
+	var settings Settings
+	if err := json.Unmarshal(data, &settings); err == nil {
+		if local, ok := settings.Profiles["local"]; ok {
+			if runtime.GOOS == "darwin" {
+				local.Runtime = "container"
+			} else {
+				local.Runtime = "docker"
+			}
+			settings.Profiles["local"] = local
+			if updated, err := json.MarshalIndent(settings, "", "  "); err == nil {
+				return updated, nil
+			}
+		}
+	}
+	return data, nil
 }
 
 func SeedTemplateDir(templateDir, templateName, harness, embedDir, configDirName string, force bool) error {
@@ -147,7 +167,7 @@ func InitProject(targetDir string) error {
 	settingsPath := filepath.Join(projectDir, "settings.json")
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
 		// Seed with default settings
-		defaultSettings, err := embedsFS.ReadFile("embeds/default_settings.json")
+		defaultSettings, err := GetDefaultSettingsData()
 		if err != nil {
 			return fmt.Errorf("failed to read default settings: %w", err)
 		}
@@ -183,7 +203,7 @@ func InitGlobal() error {
 	// Create global settings file if it doesn't exist
 	settingsPath := filepath.Join(globalDir, "settings.json")
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
-		defaultSettings, err := embedsFS.ReadFile("embeds/default_settings.json")
+		defaultSettings, err := GetDefaultSettingsData()
 		if err != nil {
 			return fmt.Errorf("failed to read default settings: %w", err)
 		}
