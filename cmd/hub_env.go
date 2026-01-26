@@ -34,14 +34,15 @@ Variables are resolved hierarchically when an agent starts:
   user -> grove -> host -> agent config
 
 Examples:
-  # Set a user-scoped variable
+  # Set a user-scoped variable (two formats)
+  scion hub env set API_URL=https://api.example.com
   scion hub env set API_URL https://api.example.com
 
   # Set a grove-scoped variable (infer grove from current directory)
-  scion hub env set --grove API_URL https://api.example.com
+  scion hub env set --grove API_URL=https://api.example.com
 
   # Set a grove-scoped variable with explicit grove ID
-  scion hub env set --grove=abc123 API_URL https://api.example.com
+  scion hub env set --grove=abc123 API_URL=https://api.example.com
 
   # List all user variables
   scion hub env get
@@ -55,18 +56,22 @@ Examples:
 
 // hubEnvSetCmd sets an environment variable
 var hubEnvSetCmd = &cobra.Command{
-	Use:   "set KEY VALUE",
+	Use:   "set KEY=VALUE | KEY VALUE",
 	Short: "Set an environment variable",
 	Long: `Set an environment variable in the Hub.
 
 By default, variables are scoped to the current user. Use --grove or --host
 to set variables at different scopes.
 
+The value can be provided as a single argument in KEY=VALUE format, or as
+two separate arguments.
+
 Examples:
+  scion hub env set API_URL=https://api.example.com
   scion hub env set API_URL https://api.example.com
-  scion hub env set --grove LOG_LEVEL debug
+  scion hub env set --grove LOG_LEVEL=debug
   scion hub env set --host DATABASE_HOST localhost`,
-	Args: cobra.ExactArgs(2),
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runEnvSet,
 }
 
@@ -161,8 +166,21 @@ func resolveEnvScope(cmd *cobra.Command, settings *config.Settings) (scope, scop
 }
 
 func runEnvSet(cmd *cobra.Command, args []string) error {
-	key := args[0]
-	value := args[1]
+	var key, value string
+
+	if len(args) == 1 {
+		// Single argument: expect KEY=VALUE format
+		parts := strings.SplitN(args[0], "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid format: expected KEY=VALUE or KEY VALUE")
+		}
+		key = parts[0]
+		value = parts[1]
+	} else {
+		// Two arguments: KEY VALUE
+		key = args[0]
+		value = args[1]
+	}
 
 	// Validate key
 	if key == "" {
