@@ -231,6 +231,209 @@ sequenceDiagram
 *   No Hub registration or external network dependencies required.
 *   Can be upgraded to Read-Only mode by configuring a Hub endpoint.
 
-## 6. Migration & Compatibility
+## 6. Environment Variables & Secrets Management
+
+The hosted architecture includes a centralized system for managing environment variables and secrets that can be scoped to users, groves, or runtime hosts. These values are securely stored by the Hub and injected into agents at runtime.
+
+### 6.1. Scope Hierarchy
+
+Environment variables and secrets are resolved using a hierarchical scope system. When an agent starts, values are merged in the following order (later scopes override earlier):
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Resolution Order                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. User Scope (lowest priority)                               │
+│      └── Variables/secrets defined for the current user         │
+│                                                                  │
+│   2. Grove Scope                                                 │
+│      └── Variables/secrets defined for the grove                │
+│                                                                  │
+│   3. Runtime Host Scope                                         │
+│      └── Variables/secrets defined for the specific host        │
+│                                                                  │
+│   4. Agent Config (highest priority)                            │
+│      └── Variables explicitly set in agent creation request     │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Example Resolution:**
+```
+User scope:      API_KEY=user-key, LOG_LEVEL=info
+Grove scope:     API_KEY=grove-key, PROJECT_ID=my-project
+Host scope:      LOG_LEVEL=debug
+Agent config:    PROJECT_ID=override
+
+Result:          API_KEY=grove-key, LOG_LEVEL=debug, PROJECT_ID=override
+```
+
+### 6.2. Data Model
+
+#### EnvVar (Environment Variable)
+
+```json
+{
+  "id": "string",              // UUID
+  "key": "string",             // Variable name (e.g., "API_KEY")
+  "value": "string",           // Variable value
+
+  "scope": "string",           // user, grove, runtime_host
+  "scopeId": "string",         // ID of the scoped entity (userId, groveId, hostId)
+
+  "description": "string",     // Optional description
+  "sensitive": false,          // If true, value is masked in UI/logs
+
+  "created": "2025-01-24T10:00:00Z",
+  "updated": "2025-01-24T10:30:00Z",
+  "createdBy": "string"        // User ID who created this
+}
+```
+
+#### Secret
+
+Secrets are write-only values that cannot be retrieved after creation. They follow the same scoping rules as environment variables but have additional security constraints.
+
+```json
+{
+  "id": "string",              // UUID
+  "key": "string",             // Secret name (e.g., "ANTHROPIC_API_KEY")
+
+  "scope": "string",           // user, grove, runtime_host
+  "scopeId": "string",         // ID of the scoped entity
+
+  "description": "string",     // Optional description
+  "version": 1,                // Incremented on each update
+
+  "created": "2025-01-24T10:00:00Z",
+  "updated": "2025-01-24T10:30:00Z",
+  "createdBy": "string",
+  "updatedBy": "string"
+}
+```
+
+**Note:** The `value` field is intentionally omitted from Secret responses. Secrets are never returned via the API after creation.
+
+### 6.3. Storage
+
+#### Initial Implementation (Clear-Text)
+
+The initial implementation stores values directly in the database:
+*   **Environment Variables:** Stored in clear-text in the `env_vars` table
+*   **Secrets:** Stored in clear-text in the `secrets` table (future: encrypted)
+
+#### Future Improvements
+
+1. **At-Rest Encryption:** Secrets encrypted using AES-256-GCM with a key derived from a master secret
+2. **Key Management Service:** Integration with cloud KMS (GCP KMS, AWS KMS)
+3. **External Secret Backends:**
+   *   HashiCorp Vault
+   *   GCP Secret Manager
+   *   AWS Secrets Manager
+
+### 6.4. CLI Interface
+
+The CLI provides commands for managing environment variables and secrets at different scopes.
+
+#### Environment Variables
+
+```bash
+# User scope (current authenticated user)
+scion hub env set FOO bar                    # Set user-scoped variable
+scion hub env get FOO                        # Get specific variable
+scion hub env get                            # List all user variables
+scion hub env clear FOO                      # Delete variable
+
+# Grove scope
+scion hub env set --grove <grove-id> FOO bar # Explicit grove ID
+scion hub env set --grove FOO bar            # Infer grove from current directory
+scion hub env get --grove <grove-id> FOO     # Get grove variable
+scion hub env get --grove                    # List grove variables
+scion hub env clear --grove FOO              # Delete grove variable
+
+# Runtime Host scope
+scion hub env set --host <host-id> FOO bar   # Explicit host ID
+scion hub env set --host FOO bar             # Use current machine as host
+scion hub env get --host <host-id> FOO       # Get host variable
+scion hub env get --host                     # List host variables
+scion hub env clear --host FOO               # Delete host variable
+```
+
+#### Secrets
+
+Secrets follow the same pattern but use the `secret` subcommand. Note that `get` only returns metadata, never the secret value.
+
+```bash
+# User scope
+scion hub secret set API_KEY <value>         # Set user-scoped secret
+scion hub secret get API_KEY                 # Get metadata (no value)
+scion hub secret get                         # List all user secrets
+scion hub secret clear API_KEY               # Delete secret
+
+# Grove scope
+scion hub secret set --grove API_KEY <value> # Set grove-scoped secret
+scion hub secret get --grove                 # List grove secrets
+scion hub secret clear --grove API_KEY       # Delete grove secret
+
+# Runtime Host scope
+scion hub secret set --host API_KEY <value>  # Set host-scoped secret
+scion hub secret get --host                  # List host secrets
+scion hub secret clear --host API_KEY        # Delete host secret
+```
+
+#### Grove and Host Inference
+
+When `--grove` or `--host` is specified without an ID:
+*   **Grove:** Inferred from the current git repository's remote URL, or from `.scion/settings.yaml` if a grove ID is stored locally
+*   **Host:** Inferred from the current machine's hostname or stored host ID in local settings
+
+### 6.5. Agent Injection Flow
+
+When an agent is created, the Hub resolves and injects environment variables and secrets:
+
+```mermaid
+sequenceDiagram
+    participant User as User/CLI
+    participant Hub as Scion Hub
+    participant DB as Database
+    participant Host as Runtime Host
+    participant Agent as Agent
+
+    User->>Hub: POST /agents (groveId, config)
+    Hub->>DB: Get user env/secrets
+    Hub->>DB: Get grove env/secrets
+    Hub->>DB: Get host env/secrets
+    Hub->>Hub: Merge by scope priority
+    Hub->>Hub: Apply agent config overrides
+    Hub->>Host: DispatchAgentCreate (merged env)
+    Host->>Agent: Start container with env vars
+    Agent-->>Host: Running
+    Host-->>Hub: Status: running
+    Hub-->>User: 201 Created
+```
+
+The merged environment is passed to the Runtime Host as part of the `CreateAgent` command. The Runtime Host then injects these values into the agent container.
+
+### 6.6. Security Considerations
+
+1. **Secrets are write-only:** The API never returns secret values after creation
+2. **Audit logging:** All secret access and modifications are logged with user attribution
+3. **Scope isolation:** Users can only manage secrets for resources they own or have write access to
+4. **Transport security:** All API communication uses TLS
+5. **Secret masking:** Secret values are masked in logs, UI, and error messages
+6. **Rotation support:** Secrets can be updated in place; version tracking enables rollback
+
+### 6.7. Access Control
+
+| Operation | User Scope | Grove Scope | Host Scope |
+|-----------|------------|-------------|------------|
+| Create/Update | Owner only | Grove owner/admin | Host owner/admin |
+| Read (env) | Owner only | Grove members | Host contributors |
+| Read (secret metadata) | Owner only | Grove members | Host contributors |
+| Read (secret value) | Never via API | Never via API | Never via API |
+| Delete | Owner only | Grove owner/admin | Host owner/admin |
+
+## 7. Migration & Compatibility
 *   **Manager Interface:** The `pkg/agent.Manager` will be split/refined to support remote execution.
 *   **Storage Interface:** Introduce `pkg/store` interface to abstract `sqlite` (local) vs `firestore` (hosted).

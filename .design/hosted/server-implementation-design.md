@@ -609,6 +609,76 @@ server:
       migrationLock: true  # prevent concurrent migrations
 ```
 
+### 10.3 Environment Variables & Secrets Tables
+
+The Hub stores environment variables and secrets in dedicated tables with scope-based partitioning.
+
+#### env_vars Table
+
+```sql
+CREATE TABLE env_vars (
+    id          TEXT PRIMARY KEY,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    scope       TEXT NOT NULL,             -- 'user', 'grove', 'runtime_host'
+    scope_id    TEXT NOT NULL,             -- user_id, grove_id, or host_id
+    description TEXT,
+    sensitive   BOOLEAN DEFAULT FALSE,     -- mask in UI/logs
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by  TEXT,
+
+    UNIQUE(key, scope, scope_id)
+);
+
+CREATE INDEX idx_env_vars_scope ON env_vars(scope, scope_id);
+CREATE INDEX idx_env_vars_key ON env_vars(key);
+```
+
+#### secrets Table
+
+```sql
+CREATE TABLE secrets (
+    id          TEXT PRIMARY KEY,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,             -- Future: encrypted blob
+    scope       TEXT NOT NULL,             -- 'user', 'grove', 'runtime_host'
+    scope_id    TEXT NOT NULL,             -- user_id, grove_id, or host_id
+    description TEXT,
+    version     INTEGER DEFAULT 1,         -- incremented on update
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by  TEXT,
+    updated_by  TEXT,
+
+    UNIQUE(key, scope, scope_id)
+);
+
+CREATE INDEX idx_secrets_scope ON secrets(scope, scope_id);
+CREATE INDEX idx_secrets_key ON secrets(key);
+```
+
+#### Secret Audit Log (Future)
+
+For compliance and security auditing, secret access events can be logged:
+
+```sql
+CREATE TABLE secret_audit_log (
+    id          TEXT PRIMARY KEY,
+    secret_id   TEXT NOT NULL,
+    action      TEXT NOT NULL,             -- 'created', 'updated', 'deleted', 'accessed'
+    user_id     TEXT,
+    agent_id    TEXT,                      -- if accessed during agent creation
+    ip_address  TEXT,
+    timestamp   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (secret_id) REFERENCES secrets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_secret_audit_log_secret ON secret_audit_log(secret_id);
+CREATE INDEX idx_secret_audit_log_timestamp ON secret_audit_log(timestamp);
+```
+
 ---
 
 ## 11. Background Mode

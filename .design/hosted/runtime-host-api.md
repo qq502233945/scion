@@ -265,6 +265,11 @@ POST /api/v1/agents
       }
     }
   },
+  "resolvedEnv": {
+    "ANTHROPIC_API_KEY": "sk-...",
+    "LOG_LEVEL": "debug",
+    "PROJECT_ID": "my-project"
+  },
   "hubEndpoint": "https://hub.scion.dev",
   "agentToken": "eyJ..."
 }
@@ -543,9 +548,51 @@ GET /api/v1/info
 }
 ```
 
-## 5. Data Structures & Standards
+## 5. Environment Variable Injection
 
-### 5.1. Error Response
+When the Hub dispatches a `CreateAgent` command to a Runtime Host, it includes a `resolvedEnv` field containing the fully merged environment variables and secrets for the agent.
+
+### 5.1 Resolution Process
+
+The Hub resolves environment variables from multiple scopes before dispatching:
+
+1. **User scope:** Variables/secrets defined for the agent's owner
+2. **Grove scope:** Variables/secrets defined for the grove
+3. **Runtime Host scope:** Variables/secrets defined for the target host
+4. **Agent config:** Variables explicitly set in the agent creation request
+
+Later scopes override earlier ones. See `hosted-architecture.md` Section 6 for the full design.
+
+### 5.2 Request Format
+
+The `resolvedEnv` field in the agent creation request contains the final merged environment:
+
+```json
+{
+  "resolvedEnv": {
+    "ANTHROPIC_API_KEY": "sk-...",   // Secret from user scope
+    "LOG_LEVEL": "debug",            // Env var from host scope
+    "PROJECT_ID": "my-project"       // Env var from grove scope
+  }
+}
+```
+
+The `config.env` field contains additional variables specified directly in the agent creation request. The Runtime Host should merge both, with `config.env` taking precedence over `resolvedEnv`.
+
+### 5.3 Injection Behavior
+
+The Runtime Host must:
+
+1. Merge `resolvedEnv` with `config.env` (config.env takes precedence)
+2. Inject all variables into the container environment
+3. Never log secret values (variables from the secrets table)
+4. Handle missing `resolvedEnv` gracefully (empty object for solo mode)
+
+---
+
+## 6. Data Structures & Standards
+
+### 6.1. Error Response
 
 All errors return a standardized JSON body:
 
@@ -574,7 +621,7 @@ All errors return a standardized JSON body:
 | 409 | `conflict` | Resource conflict |
 | 500 | `internal_error` | Server error |
 
-### 5.2. Type Mappings
+### 6.2. Type Mappings
 
 | API Concept | Go Type (`pkg/api`) |
 |-------------|---------------------|
@@ -583,7 +630,7 @@ All errors return a standardized JSON body:
 | Resources | `K8sResources` |
 | Volume Mount | `VolumeMount` |
 
-### 5.3. Naming Conventions
+### 6.3. Naming Conventions
 
 All JSON fields use **camelCase**:
 - `agentId`, `groveId`, `hostId`
@@ -593,9 +640,9 @@ All JSON fields use **camelCase**:
 All status values use **lowercase**:
 - `pending`, `provisioning`, `running`, `stopped`, `error`
 
-## 6. Timeouts & Limits
+## 7. Timeouts & Limits
 
-### 6.1. Command Timeouts
+### 7.1. Command Timeouts
 
 | Operation | Default | Max |
 |-----------|---------|-----|
@@ -606,7 +653,7 @@ All status values use **lowercase**:
 | Exec | 30s | 300s |
 | Attach (open) | 10s | 30s |
 
-### 6.2. Rate Limits
+### 7.2. Rate Limits
 
 | Endpoint Category | Limit |
 |-------------------|-------|
@@ -614,14 +661,14 @@ All status values use **lowercase**:
 | Write operations | 100/minute |
 | Agent creation | 20/minute |
 
-## 7. Implementation Plan
+## 8. Implementation Plan
 
 1. **Phase 1:** Define Go interfaces/structs for API models (aligned with Hub API types)
 2. **Phase 2:** Implement Host API Server (wrapping `pkg/agent.Manager`)
 3. **Phase 3:** Implement Hub client for Direct HTTP mode
 4. **Phase 4:** Implement Control Channel adapter (translates WS commands to local API calls)
 
-## 8. References
+## 9. References
 
 - **Hub API Specification:** `hub-api.md` (primary reference)
 - **Architecture Overview:** `hosted-architecture.md`

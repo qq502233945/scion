@@ -326,6 +326,12 @@ type Client interface {
     // Users returns the user operations interface.
     Users() UserService
 
+    // Env returns the environment variable operations interface.
+    Env() EnvService
+
+    // Secrets returns the secret operations interface.
+    Secrets() SecretService
+
     // Auth returns the authentication operations interface.
     Auth() AuthService
 
@@ -849,7 +855,159 @@ type UpdateUserRequest struct {
 }
 ```
 
-### 3.8. Auth Service
+### 3.8. Env Service
+
+```go
+package hubclient
+
+import (
+    "context"
+
+    "github.com/ptone/scion-agent/pkg/apiclient"
+)
+
+// EnvService handles environment variable operations.
+type EnvService interface {
+    // List returns environment variables for the specified scope.
+    List(ctx context.Context, opts *ListEnvOptions) (*ListEnvResponse, error)
+
+    // Get returns a specific environment variable by key.
+    Get(ctx context.Context, key string, opts *EnvScopeOptions) (*EnvVar, error)
+
+    // Set creates or updates an environment variable.
+    Set(ctx context.Context, key string, req *SetEnvRequest) (*SetEnvResponse, error)
+
+    // Delete removes an environment variable.
+    Delete(ctx context.Context, key string, opts *EnvScopeOptions) error
+}
+
+// ListEnvOptions configures environment variable listing.
+type ListEnvOptions struct {
+    Scope   string // user, grove, runtime_host (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+    Key     string // Optional: filter by specific key
+}
+
+// ListEnvResponse is the response from listing environment variables.
+type ListEnvResponse struct {
+    EnvVars []EnvVar `json:"envVars"`
+    Scope   string   `json:"scope"`
+    ScopeID string   `json:"scopeId"`
+}
+
+// EnvScopeOptions specifies the scope for get/delete operations.
+type EnvScopeOptions struct {
+    Scope   string // user, grove, runtime_host (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+}
+
+// SetEnvRequest is the request for setting an environment variable.
+type SetEnvRequest struct {
+    Value       string `json:"value"`                 // Required: variable value
+    Scope       string `json:"scope,omitempty"`       // Scope type (default: user)
+    ScopeID     string `json:"scopeId,omitempty"`     // Required for grove/runtime_host scope
+    Description string `json:"description,omitempty"` // Optional description
+    Sensitive   bool   `json:"sensitive,omitempty"`   // Mask value in responses
+}
+
+// SetEnvResponse is the response from setting an environment variable.
+type SetEnvResponse struct {
+    EnvVar  *EnvVar `json:"envVar"`
+    Created bool    `json:"created"` // Whether this was a new variable
+}
+
+// EnvVar represents an environment variable.
+type EnvVar struct {
+    ID          string    `json:"id"`
+    Key         string    `json:"key"`
+    Value       string    `json:"value"`
+    Scope       string    `json:"scope"`
+    ScopeID     string    `json:"scopeId"`
+    Description string    `json:"description,omitempty"`
+    Sensitive   bool      `json:"sensitive,omitempty"`
+    Created     time.Time `json:"created"`
+    Updated     time.Time `json:"updated"`
+    CreatedBy   string    `json:"createdBy,omitempty"`
+}
+```
+
+### 3.9. Secret Service
+
+```go
+package hubclient
+
+import (
+    "context"
+    "time"
+)
+
+// SecretService handles secret operations.
+// Note: Secret values are write-only and never returned by the API.
+type SecretService interface {
+    // List returns secret metadata for the specified scope.
+    // Values are never returned.
+    List(ctx context.Context, opts *ListSecretOptions) (*ListSecretResponse, error)
+
+    // Get returns metadata for a specific secret by key.
+    // Value is never returned.
+    Get(ctx context.Context, key string, opts *SecretScopeOptions) (*Secret, error)
+
+    // Set creates or updates a secret.
+    Set(ctx context.Context, key string, req *SetSecretRequest) (*SetSecretResponse, error)
+
+    // Delete removes a secret.
+    Delete(ctx context.Context, key string, opts *SecretScopeOptions) error
+}
+
+// ListSecretOptions configures secret listing.
+type ListSecretOptions struct {
+    Scope   string // user, grove, runtime_host (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+}
+
+// ListSecretResponse is the response from listing secrets.
+type ListSecretResponse struct {
+    Secrets []Secret `json:"secrets"` // Metadata only, no values
+    Scope   string   `json:"scope"`
+    ScopeID string   `json:"scopeId"`
+}
+
+// SecretScopeOptions specifies the scope for get/delete operations.
+type SecretScopeOptions struct {
+    Scope   string // user, grove, runtime_host (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+}
+
+// SetSecretRequest is the request for setting a secret.
+type SetSecretRequest struct {
+    Value       string `json:"value"`                 // Required: secret value (write-only)
+    Scope       string `json:"scope,omitempty"`       // Scope type (default: user)
+    ScopeID     string `json:"scopeId,omitempty"`     // Required for grove/runtime_host scope
+    Description string `json:"description,omitempty"` // Optional description
+}
+
+// SetSecretResponse is the response from setting a secret.
+type SetSecretResponse struct {
+    Secret  *Secret `json:"secret"` // Metadata only, no value
+    Created bool    `json:"created"` // Whether this was a new secret
+}
+
+// Secret represents secret metadata (value is never returned).
+type Secret struct {
+    ID          string    `json:"id"`
+    Key         string    `json:"key"`
+    Scope       string    `json:"scope"`
+    ScopeID     string    `json:"scopeId"`
+    Description string    `json:"description,omitempty"`
+    Version     int       `json:"version"`
+    Created     time.Time `json:"created"`
+    Updated     time.Time `json:"updated"`
+    CreatedBy   string    `json:"createdBy,omitempty"`
+    UpdatedBy   string    `json:"updatedBy,omitempty"`
+}
+```
+
+### 3.10. Auth Service
 
 ```go
 package hubclient

@@ -925,9 +925,297 @@ POST /api/v1/templates/{templateId}/clone
 
 ---
 
-## 7. WebSocket Endpoints
+## 7. Environment Variables & Secrets Endpoints
 
-### 7.0 WebSocket Authentication
+The Hub provides endpoints for managing environment variables and secrets scoped to users, groves, or runtime hosts. See `hosted-architecture.md` Section 6 for the full design.
+
+### 7.1 Data Models
+
+#### EnvVar
+
+```json
+{
+  "id": "string",              // UUID
+  "key": "string",             // Variable name (e.g., "LOG_LEVEL")
+  "value": "string",           // Variable value
+
+  "scope": "string",           // user, grove, runtime_host
+  "scopeId": "string",         // ID of the scoped entity
+
+  "description": "string",     // Optional description
+  "sensitive": false,          // If true, value is masked in responses
+
+  "created": "2025-01-24T10:00:00Z",
+  "updated": "2025-01-24T10:30:00Z",
+  "createdBy": "string"
+}
+```
+
+#### Secret (Metadata Only)
+
+```json
+{
+  "id": "string",              // UUID
+  "key": "string",             // Secret name (e.g., "API_KEY")
+
+  "scope": "string",           // user, grove, runtime_host
+  "scopeId": "string",         // ID of the scoped entity
+
+  "description": "string",     // Optional description
+  "version": 1,                // Incremented on each update
+
+  "created": "2025-01-24T10:00:00Z",
+  "updated": "2025-01-24T10:30:00Z",
+  "createdBy": "string",
+  "updatedBy": "string"
+}
+```
+
+**Note:** Secret values are never returned in API responses.
+
+### 7.2 Environment Variable Endpoints
+
+#### List Environment Variables
+
+```
+GET /api/v1/env
+```
+
+Returns environment variables for the specified scope. Defaults to user scope.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | string | Scope type: `user`, `grove`, `runtime_host` (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `key` | string | Filter by specific key (optional) |
+
+**Response:**
+```json
+{
+  "envVars": [EnvVar],
+  "scope": "string",
+  "scopeId": "string"
+}
+```
+
+#### Get Environment Variable
+
+```
+GET /api/v1/env/{key}
+```
+
+Returns a specific environment variable by key.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | string | Scope type (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+
+**Response:**
+```json
+EnvVar
+```
+
+#### Set Environment Variable
+
+```
+PUT /api/v1/env/{key}
+```
+
+Creates or updates an environment variable. Upsert semantics based on key + scope + scopeId.
+
+**Request Body:**
+```json
+{
+  "value": "string",           // Required: variable value
+  "scope": "string",           // Scope type (default: user)
+  "scopeId": "string",         // Required for grove/runtime_host scope
+  "description": "string",     // Optional description
+  "sensitive": false           // Optional: mask value in responses
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "envVar": EnvVar,
+  "created": true              // Whether this was a new variable
+}
+```
+
+#### Delete Environment Variable
+
+```
+DELETE /api/v1/env/{key}
+```
+
+Deletes an environment variable.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | string | Scope type (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+
+**Response:** `204 No Content`
+
+### 7.3 Secret Endpoints
+
+#### List Secrets
+
+```
+GET /api/v1/secrets
+```
+
+Returns secret metadata for the specified scope. **Values are never returned.**
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | string | Scope type: `user`, `grove`, `runtime_host` (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+
+**Response:**
+```json
+{
+  "secrets": [Secret],         // Metadata only, no values
+  "scope": "string",
+  "scopeId": "string"
+}
+```
+
+#### Get Secret Metadata
+
+```
+GET /api/v1/secrets/{key}
+```
+
+Returns metadata for a specific secret. **Value is never returned.**
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | string | Scope type (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+
+**Response:**
+```json
+Secret                         // Metadata only, no value
+```
+
+#### Set Secret
+
+```
+PUT /api/v1/secrets/{key}
+```
+
+Creates or updates a secret. Upsert semantics based on key + scope + scopeId.
+
+**Request Body:**
+```json
+{
+  "value": "string",           // Required: secret value (write-only)
+  "scope": "string",           // Scope type (default: user)
+  "scopeId": "string",         // Required for grove/runtime_host scope
+  "description": "string"      // Optional description
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "secret": Secret,            // Metadata only, no value
+  "created": true              // Whether this was a new secret
+}
+```
+
+#### Delete Secret
+
+```
+DELETE /api/v1/secrets/{key}
+```
+
+Deletes a secret.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | string | Scope type (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+
+**Response:** `204 No Content`
+
+### 7.4 Resolved Environment (Internal)
+
+This endpoint is used internally by the Hub when dispatching agent creation commands. It returns the fully resolved environment for an agent, merging values from all applicable scopes.
+
+```
+GET /api/v1/agents/{agentId}/resolved-env
+```
+
+**Note:** This is an internal endpoint used by the Hub during agent creation. The resolved environment includes both env vars and decrypted secrets.
+
+**Response:**
+```json
+{
+  "env": {
+    "KEY": "value",
+    "ANOTHER_KEY": "another_value"
+  },
+  "sources": {
+    "KEY": "user",
+    "ANOTHER_KEY": "grove"
+  }
+}
+```
+
+### 7.5 Scope-Specific Convenience Endpoints
+
+For convenience, the API also provides scope-specific endpoints that mirror the generic endpoints:
+
+#### User Scope
+```
+GET    /api/v1/users/me/env
+GET    /api/v1/users/me/env/{key}
+PUT    /api/v1/users/me/env/{key}
+DELETE /api/v1/users/me/env/{key}
+GET    /api/v1/users/me/secrets
+GET    /api/v1/users/me/secrets/{key}
+PUT    /api/v1/users/me/secrets/{key}
+DELETE /api/v1/users/me/secrets/{key}
+```
+
+#### Grove Scope
+```
+GET    /api/v1/groves/{groveId}/env
+GET    /api/v1/groves/{groveId}/env/{key}
+PUT    /api/v1/groves/{groveId}/env/{key}
+DELETE /api/v1/groves/{groveId}/env/{key}
+GET    /api/v1/groves/{groveId}/secrets
+GET    /api/v1/groves/{groveId}/secrets/{key}
+PUT    /api/v1/groves/{groveId}/secrets/{key}
+DELETE /api/v1/groves/{groveId}/secrets/{key}
+```
+
+#### Runtime Host Scope
+```
+GET    /api/v1/runtime-hosts/{hostId}/env
+GET    /api/v1/runtime-hosts/{hostId}/env/{key}
+PUT    /api/v1/runtime-hosts/{hostId}/env/{key}
+DELETE /api/v1/runtime-hosts/{hostId}/env/{key}
+GET    /api/v1/runtime-hosts/{hostId}/secrets
+GET    /api/v1/runtime-hosts/{hostId}/secrets/{key}
+PUT    /api/v1/runtime-hosts/{hostId}/secrets/{key}
+DELETE /api/v1/runtime-hosts/{hostId}/secrets/{key}
+```
+
+---
+
+## 8. WebSocket Endpoints
+
+### 8.1 WebSocket Authentication
 
 Browser WebSocket APIs cannot set custom HTTP headers. WebSocket endpoints support two authentication methods:
 
@@ -952,7 +1240,7 @@ Browser WebSocket APIs cannot set custom HTTP headers. WebSocket endpoints suppo
    WS /api/v1/agents/{agentId}/pty?ticket=<ticket>
    ```
 
-### 7.1 Agent PTY
+### 8.2 Agent PTY
 
 ```
 WS /api/v1/agents/{agentId}/pty
@@ -985,7 +1273,7 @@ Provides web terminal access to an agent. The Hub proxies the connection to the 
 
 **Stream Multiplexing:** When the Hub proxies PTY to a Runtime Host over the control channel, each stream is assigned a unique `streamId`. The Hub maintains the mapping between client WebSocket connections and control channel streams.
 
-### 7.2 Agent Status Stream
+### 8.3 Agent Status Stream
 
 ```
 WS /api/v1/agents/{agentId}/events
@@ -998,7 +1286,7 @@ Real-time stream of agent status events.
 StatusEvent
 ```
 
-### 7.3 Grove Events
+### 8.4 Grove Events
 
 ```
 WS /api/v1/groves/{groveId}/events
@@ -1006,7 +1294,7 @@ WS /api/v1/groves/{groveId}/events
 
 Real-time stream of all agent events within a grove.
 
-### 7.4 Global Events
+### 8.5 Global Events
 
 ```
 WS /api/v1/events
@@ -1023,7 +1311,7 @@ Real-time stream of all events (admin only).
 
 ---
 
-## 8. Error Responses
+## 9. Error Responses
 
 All error responses follow a consistent format:
 
@@ -1057,9 +1345,9 @@ All error responses follow a consistent format:
 
 ---
 
-## 9. Authentication & Authorization
+## 10. Authentication & Authorization
 
-### 9.1 Authentication Methods
+### 10.1 Authentication Methods
 
 1. **Bearer Token** (Primary)
    ```
@@ -1081,7 +1369,7 @@ All error responses follow a consistent format:
    X-Scion-Host-Token: <token>
    ```
 
-### 9.2 Authentication Endpoints
+### 10.2 Authentication Endpoints
 
 ```
 POST /api/v1/auth/login
@@ -1090,7 +1378,7 @@ POST /api/v1/auth/refresh
 GET  /api/v1/auth/me
 ```
 
-### 9.3 Authorization Model
+### 10.3 Authorization Model
 
 Resources support three visibility levels:
 - **private**: Only the owner can access
@@ -1102,7 +1390,7 @@ Role-based access control:
 - **member**: Can create/manage own resources
 - **viewer**: Read-only access to visible resources
 
-### 9.4 Token Lifecycle
+### 10.4 Token Lifecycle
 
 #### Host Tokens
 
@@ -1152,13 +1440,13 @@ Role-based access control:
 
 ---
 
-## 10. Host Control Plane Protocol
+## 11. Host Control Plane Protocol
 
 Runtime Hosts often run behind NAT/firewalls (developer laptops, on-premise servers). The Hub cannot initiate HTTP connections to these hosts. Instead, **Runtime Hosts establish a persistent WebSocket control channel to the Hub**.
 
 The control channel is established **after grove registration**. The host must first register at least one grove via the REST API, then connect the control channel for real-time communication.
 
-### 10.1 Control Channel Architecture
+### 11.1 Control Channel Architecture
 
 ```
 ┌─────────────────┐                    ┌─────────────────┐
@@ -1179,7 +1467,7 @@ The control channel is established **after grove registration**. The host must f
         │  (PTY, File Transfer, Logs)          │
 ```
 
-### 10.2 Control Channel Connection
+### 11.2 Control Channel Connection
 
 ```
 WS /api/v1/runtime-hosts/connect
@@ -1233,7 +1521,7 @@ Runtime Host initiates a persistent WebSocket connection to the Hub. The host mu
 }
 ```
 
-### 10.3 Command Messages (Hub → Host)
+### 11.3 Command Messages (Hub → Host)
 
 The Hub sends commands to Runtime Hosts over the control channel.
 
@@ -1310,7 +1598,7 @@ The Hub sends commands to Runtime Hosts over the control channel.
 }
 ```
 
-### 10.4 Response Messages (Host → Hub)
+### 11.4 Response Messages (Host → Hub)
 
 **Response Envelope:**
 ```json
@@ -1326,7 +1614,7 @@ The Hub sends commands to Runtime Hosts over the control channel.
 }
 ```
 
-### 10.5 Event Messages (Host → Hub)
+### 11.5 Event Messages (Host → Hub)
 
 Runtime Hosts send unsolicited events to the Hub.
 
@@ -1363,7 +1651,7 @@ Runtime Hosts send unsolicited events to the Hub.
 }
 ```
 
-### 10.6 Stream Multiplexing
+### 11.6 Stream Multiplexing
 
 Byte streams (PTY, logs, file transfer) are multiplexed over the control channel using stream frames.
 
@@ -1387,7 +1675,7 @@ Byte streams (PTY, logs, file transfer) are multiplexed over the control channel
 
 The Hub maps incoming client WebSocket connections (e.g., `/agents/{id}/pty`) to stream IDs on the appropriate Runtime Host control channel.
 
-### 10.7 Heartbeat & Reconnection
+### 11.7 Heartbeat & Reconnection
 
 - **Heartbeat Interval:** Host sends heartbeat every 30 seconds
 - **Timeout:** Hub marks host as `disconnected` after 90 seconds without heartbeat
@@ -1407,7 +1695,7 @@ The Hub maps incoming client WebSocket connections (e.g., `/agents/{id}/pty`) to
 }
 ```
 
-### 10.8 Read-Only Mode
+### 11.8 Read-Only Mode
 
 In read-only mode, the Runtime Host:
 - Establishes control channel connection
@@ -1417,7 +1705,7 @@ In read-only mode, the Runtime Host:
 
 The Hub tracks these agents but cannot control their lifecycle.
 
-### 10.9 Transport Selection
+### 11.9 Transport Selection
 
 The Hub supports two transport modes for communicating with Runtime Hosts:
 
@@ -1446,7 +1734,7 @@ Control channel commands map to Runtime Host API endpoints:
 
 See `runtime-host-api.md` for the complete Runtime Host API specification.
 
-### 10.10 Command Timeouts
+### 11.10 Command Timeouts
 
 Commands sent over the control channel have configurable timeouts:
 
@@ -1478,7 +1766,7 @@ Commands sent over the control channel have configurable timeouts:
 
 ---
 
-## 11. Rate Limiting
+## 12. Rate Limiting
 
 Rate limits are enforced per-user and per-API-key:
 
@@ -1498,7 +1786,7 @@ X-RateLimit-Reset: 1706097600
 
 ---
 
-## 12. Versioning & Deprecation
+## 13. Versioning & Deprecation
 
 - API versions are included in the URL path
 - Deprecated endpoints return `Deprecation` header with sunset date
@@ -1507,7 +1795,7 @@ X-RateLimit-Reset: 1706097600
 
 ---
 
-## 13. SDK Considerations
+## 14. SDK Considerations
 
 The API is designed to support generated SDKs with:
 - Consistent naming conventions
@@ -1522,7 +1810,7 @@ Recommended SDK languages:
 
 ---
 
-## 14. Future Considerations
+## 15. Future Considerations
 
 1. **Batch Operations**: Bulk agent operations for efficiency
 2. **Webhooks**: Outbound event notifications
@@ -1531,7 +1819,7 @@ Recommended SDK languages:
 5. **Multi-tenancy**: Organization/team isolation
 6. **Usage Metrics**: Resource consumption tracking and billing
 
-### 14.1 Alternative Transports: gRPC / HTTP/2
+### 15.1 Alternative Transports: gRPC / HTTP/2
 
 The current control channel uses WebSocket with a custom JSON-based protocol. A future iteration could adopt gRPC with HTTP/2 for improved efficiency and stronger contracts.
 
@@ -1564,7 +1852,7 @@ The current control channel uses WebSocket with a custom JSON-based protocol. A 
 - Proto file maintenance adds development overhead
 - gRPC provides stronger API contracts and better tooling
 
-### 14.2 Message Queue-Based Command Delivery
+### 15.2 Message Queue-Based Command Delivery
 
 The current WebSocket control channel requires persistent connections between the Hub and Runtime Hosts. This creates challenges for horizontal scaling and reliability:
 
