@@ -28,6 +28,7 @@ import '../components/pages/home.js';
 import '../components/pages/groves.js';
 import '../components/pages/agents.js';
 import '../components/pages/not-found.js';
+import '../components/pages/login.js';
 
 /**
  * Initialize the client-side application
@@ -54,6 +55,7 @@ async function init(): Promise<void> {
     customElements.whenDefined('scion-page-groves'),
     customElements.whenDefined('scion-page-agents'),
     customElements.whenDefined('scion-page-404'),
+    customElements.whenDefined('scion-login-page'),
   ]);
 
   console.info('[Scion] Components defined, setting up router...');

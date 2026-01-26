@@ -28,6 +28,7 @@ import '../../components/pages/home.js';
 import '../../components/pages/groves.js';
 import '../../components/pages/agents.js';
 import '../../components/pages/not-found.js';
+import '../../components/pages/login.js';
 
 export interface RenderContext {
   /** Current URL path */
@@ -36,13 +37,20 @@ export interface RenderContext {
   user?: User | undefined;
   /** Additional data to pass to the page */
   data?: Record<string, unknown> | undefined;
+  /** Auth configuration for login page */
+  authConfig?:
+    | {
+        googleEnabled: boolean;
+        githubEnabled: boolean;
+      }
+    | undefined;
 }
 
 /**
  * Renders a page with the app shell and page content
  */
 export async function renderPage(ctx: RenderContext): Promise<string> {
-  const { url, user, data } = ctx;
+  const { url, user, data, authConfig } = ctx;
   const pageTitle = getPageTitle(url);
 
   // Create the initial page data for hydration
@@ -52,6 +60,26 @@ export async function renderPage(ctx: RenderContext): Promise<string> {
     user,
     data,
   };
+
+  // Login page is rendered without the app shell
+  if (url === '/login') {
+    const loginTemplate = html`
+      <scion-login-page
+        ?googleEnabled=${authConfig?.googleEnabled ?? false}
+        ?githubEnabled=${authConfig?.githubEnabled ?? false}
+      ></scion-login-page>
+    `;
+
+    const componentHtml = await collectResult(render(loginTemplate));
+
+    return getHtmlTemplate({
+      title: 'Sign In',
+      content: componentHtml,
+      initialData,
+      scripts: ['/assets/main.js'],
+      styles: ['/assets/main.css'],
+    });
+  }
 
   // Determine which page to render based on URL
   const pageContent = getPageTemplate(url, initialData);

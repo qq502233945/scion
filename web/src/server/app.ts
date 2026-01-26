@@ -13,8 +13,21 @@ import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import type { AppConfig } from './config.js';
-import { errorHandler, logger, security, initDevAuth } from './middleware/index.js';
-import { healthRoutes, pageRoutes, createApiRouter } from './routes/index.js';
+import {
+  errorHandler,
+  logger,
+  security,
+  initDevAuth,
+  createSessionMiddleware,
+  createAuthMiddleware,
+} from './middleware/index.js';
+import {
+  healthRoutes,
+  pageRoutes,
+  setPageRoutesConfig,
+  createApiRouter,
+  createAuthRouter,
+} from './routes/index.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -46,9 +59,17 @@ export function createApp(config: AppConfig): Koa {
   // Body parsing for JSON requests
   app.use(bodyParser());
 
+  // Session middleware (must be before auth)
+  app.use(createSessionMiddleware(app, config));
+
   // Dev auth middleware (auto-login for development)
+  // This runs before the auth middleware so dev users bypass login
   const devAuth = initDevAuth();
   app.use(devAuth.middleware);
+
+  // Auth middleware (enforces authentication on protected routes)
+  // Skips if dev-auth already set a user
+  app.use(createAuthMiddleware(config));
 
   // Static asset serving from public/ directory
   // Path is relative to compiled location: dist/server/server/app.js
@@ -62,9 +83,17 @@ export function createApp(config: AppConfig): Koa {
     })
   );
 
+  // Set config for page routes (needed for auth config in login page)
+  setPageRoutesConfig(config);
+
   // Mount health check routes
   router.use(healthRoutes.routes());
   router.use(healthRoutes.allowedMethods());
+
+  // Mount auth routes
+  const authRouter = createAuthRouter(config);
+  router.use('/auth', authRouter.routes());
+  router.use('/auth', authRouter.allowedMethods());
 
   // Mount API proxy routes
   const apiRouter = createApiRouter(config);

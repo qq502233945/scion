@@ -8,6 +8,18 @@ import Router from '@koa/router';
 import type { Context } from 'koa';
 
 import { renderPage, isSpaRoute } from '../ssr/index.js';
+import type { AppConfig } from '../config.js';
+
+// We need to access config for auth settings
+// This is set during app initialization
+let appConfig: AppConfig | null = null;
+
+/**
+ * Set the app config for the page routes
+ */
+export function setPageRoutesConfig(config: AppConfig): void {
+  appConfig = config;
+}
 
 const router = new Router();
 
@@ -26,12 +38,21 @@ router.get('(.*)', async (ctx: Context) => {
 
   try {
     // Render the page server-side
-    // User will be set by auth middleware in future
     const user = ctx.state.user as import('../../shared/types.js').User | undefined;
+
+    // Build auth config for login page
+    const authConfig = appConfig
+      ? {
+          googleEnabled: !!appConfig.auth.googleClientId,
+          githubEnabled: !!appConfig.auth.githubClientId,
+        }
+      : undefined;
+
     const html = await renderPage({
       url,
       user,
       data: {}, // Additional data can be fetched here
+      authConfig,
     });
 
     // Set 404 status for not-found pages
@@ -57,7 +78,7 @@ router.get('(.*)', async (ctx: Context) => {
  * Check if a URL matches a known route
  */
 function isKnownRoute(url: string): boolean {
-  const knownRoutes = ['/', '/groves', '/agents', '/settings'];
+  const knownRoutes = ['/', '/groves', '/agents', '/settings', '/login'];
 
   // Exact match
   if (knownRoutes.includes(url)) {

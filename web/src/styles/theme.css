@@ -112,10 +112,8 @@
   /* Shadows */
   --scion-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --scion-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-  --scion-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1),
-    0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --scion-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1),
-    0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --scion-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --scion-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 
   /* -------------------------------------------------------------------------
      Layout
@@ -130,10 +128,12 @@
      Typography
      ------------------------------------------------------------------------- */
 
-  --scion-font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --scion-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo,
-    Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --scion-font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --scion-font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
 
   --scion-font-size-xs: 0.75rem;
   --scion-font-size-sm: 0.875rem;
@@ -296,10 +296,8 @@
   /* Shadows - stronger opacity for dark mode */
   --scion-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --scion-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
-  --scion-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4),
-    0 2px 4px -2px rgb(0 0 0 / 0.4);
-  --scion-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4),
-    0 4px 6px -4px rgb(0 0 0 / 0.4);
+  --scion-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --scion-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4);
 }
 
 /* ==========================================================================

@@ -117,10 +117,18 @@ web/
 | `HOST` | `0.0.0.0` | Server hostname |
 | `NODE_ENV` | `development` | Environment mode |
 | `HUB_API_URL` | `http://localhost:9810` | Hub API endpoint |
+| `BASE_URL` | `http://localhost:PORT` | Base URL for OAuth callbacks |
 | `SCION_API_DEBUG` | `false` | Enable debug logging (verbose request/response logs) |
 | `SCION_DEV_TOKEN` | - | Explicit dev token (overrides file) |
 | `SCION_DEV_TOKEN_FILE` | `~/.scion/dev-token` | Path to dev token file |
 | `SCION_DEV_AUTH_ENABLED` | `true` in dev | Enable/disable dev auth |
+| `SESSION_SECRET` | auto in dev | Session signing secret (required in production) |
+| `SESSION_MAX_AGE` | `86400000` | Session max age in milliseconds (24 hours) |
+| `GOOGLE_CLIENT_ID` | - | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | - | Google OAuth client secret |
+| `GITHUB_CLIENT_ID` | - | GitHub OAuth client ID |
+| `GITHUB_CLIENT_SECRET` | - | GitHub OAuth client secret |
+| `AUTHORIZED_DOMAINS` | - | Comma-separated list of authorized email domains |
 
 ## Development Authentication
 
@@ -165,7 +173,7 @@ Current status:
 - ✅ **M1: Koa Server Foundation** - Complete
 - ✅ **M2: Lit SSR Integration** - Complete
 - ✅ **M3: Web Awesome Component Library** - Complete
-- ⬜ M4: Authentication Flow
+- ✅ **M4: Authentication Flow** - Complete
 - ⬜ M5: Hub API Proxy
 - ⬜ M6: Grove & Agent Pages
 - ⬜ M7: SSE + NATS Real-Time Updates
