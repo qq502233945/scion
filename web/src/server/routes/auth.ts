@@ -119,9 +119,11 @@ export function createAuthRouter(config: AppConfig): Router {
         ctx.session.oauthState = state;
       }
 
+      const redirectUri = `${config.baseUrl}/auth/callback/github`;
       const authUrl =
         `https://github.com/login/oauth/authorize?` +
         `client_id=${encodeURIComponent(config.auth.githubClientId)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&scope=${encodeURIComponent('user:email')}` +
         `&state=${encodeURIComponent(state)}`;
 
@@ -310,6 +312,8 @@ function googlePayloadToUser(payload: TokenPayload): User {
  */
 async function handleGitHubCallback(code: string, config: AppConfig): Promise<User> {
   // Exchange code for access token
+  // Note: redirect_uri must match exactly what was sent in the authorization request
+  const redirectUri = `${config.baseUrl}/auth/callback/github`;
   const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {
@@ -320,6 +324,7 @@ async function handleGitHubCallback(code: string, config: AppConfig): Promise<Us
       client_id: config.auth.githubClientId,
       client_secret: config.auth.githubClientSecret,
       code,
+      redirect_uri: redirectUri,
     }),
   });
 
