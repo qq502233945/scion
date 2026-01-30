@@ -3166,90 +3166,30 @@ export function rateLimiter() {
 
 ---
 
-## 17. Implementation Plan
+## 17. Implementation
 
-### Phase 1: Core Server Setup
-- [ ] Koa application structure
-- [ ] Static asset serving
-- [ ] Health endpoints
-- [ ] Session management
-- [ ] Hub API proxy
+See **`frontend-milestones.md`** for the detailed implementation plan with 16 milestones, deliverables, test criteria, and progress tracking.
 
-### Phase 2: SSR with Lit
-- [ ] @lit-labs/ssr integration
-- [ ] HTML shell templates
-- [ ] Component hydration
-- [ ] Page routing
+### Milestone Summary
 
-### Phase 3: Authentication
-- [ ] OAuth routes (Google, GitHub)
-- [ ] Session-based auth
-- [ ] Protected route middleware
-- [ ] User context in SSR
-
-### Phase 4: Real-time Updates
-- [ ] NATS client integration
-- [ ] SSE endpoint
-- [ ] SSE connection manager
-- [ ] Client-side SSE handling
-- [ ] Delta update processing
-
-### Phase 5: UI Components
-- [ ] Web Awesome integration
-- [ ] App shell component
-- [ ] Grove list/detail pages
-- [ ] Agent list/detail pages
-- [ ] Status badges and cards
-
-### Phase 6: Terminal
-- [ ] xterm.js integration
-- [ ] WebSocket PTY connection
-- [ ] Terminal theming
-- [ ] Resize handling
-
-### Phase 7: Template Management UI
-- [ ] Template list page
-- [ ] Template card component
-- [ ] Template detail/viewer
-- [ ] Template upload wizard
-- [ ] Scope selector component
-- [ ] Template clone dialog
-
-### Phase 8: User & Group Management UI
-- [ ] User list page
-- [ ] User detail page
-- [ ] User avatar component
-- [ ] Group list page
-- [ ] Group detail with member management
-- [ ] Member list component
-- [ ] Group selector component
-
-### Phase 9: Permissions & Policy UI
-- [ ] Policy list page
-- [ ] Policy editor component
-- [ ] Principal selector component
-- [ ] Access evaluation debug tool
-- [ ] Permission badge component
-
-### Phase 10: Environment & Secrets UI
-- [ ] Environment settings page (scoped)
-- [ ] Secrets management page
-- [ ] Scope selector for env/secrets
-- [ ] Env var editor dialog
-- [ ] Secret editor dialog (write-only)
-
-### Phase 11: API Key Management
-- [ ] API keys list page
-- [ ] Create API key dialog
-- [ ] Key display/copy component
-- [ ] Revocation confirmation
-
-### Phase 12: Cloud Run Deployment
-- [ ] Dockerfile
-- [ ] Cloud Run configuration
-- [ ] Secret management
-- [ ] CI/CD pipeline
-- [ ] Monitoring and logging
+| Milestone | Description |
+|-----------|-------------|
+| M1 | Koa Server Foundation |
+| M2 | Lit SSR Integration |
+| M3 | Web Awesome Component Library |
+| M4 | Authentication Flow |
+| M5 | Hub API Proxy |
+| M6 | Grove & Agent Pages |
+| M7 | SSE + NATS Real-Time Updates |
+| M8 | Terminal Component |
+| M9 | Agent Creation Workflow |
+| M10 | Template Management UI |
+| M11 | User & Group Management UI |
+| M12 | Permissions & Policy Management UI |
+| M13 | Environment Variables & Secrets UI |
+| M14 | API Key Management UI |
+| M15 | Production Hardening |
+| M16 | Cloud Run Deployment |
 
 ---
 

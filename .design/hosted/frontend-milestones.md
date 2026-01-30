@@ -4,6 +4,33 @@
 
 This document outlines the implementation milestones for the Scion Web Frontend. Each milestone is designed to be independently testable and builds upon previous work. The milestones follow a bottom-up approach: infrastructure first, then core functionality, then enhanced features.
 
+For architectural details and component specifications, see **`web-frontend-design.md`**.
+
+---
+
+## Progress Summary
+
+| Milestone | Status | Description |
+|-----------|--------|-------------|
+| M1 | Not Started | Koa Server Foundation |
+| M2 | Not Started | Lit SSR Integration |
+| M3 | Not Started | Web Awesome Component Library |
+| M4 | Not Started | Authentication Flow |
+| M5 | Not Started | Hub API Proxy |
+| M6 | Not Started | Grove & Agent Pages |
+| M7 | Not Started | SSE + NATS Real-Time Updates |
+| M8 | Not Started | Terminal Component |
+| M9 | Not Started | Agent Creation Workflow |
+| M10 | Not Started | Template Management UI |
+| M11 | Not Started | User & Group Management UI |
+| M12 | Not Started | Permissions & Policy Management UI |
+| M13 | Not Started | Environment Variables & Secrets UI |
+| M14 | Not Started | API Key Management UI |
+| M15 | Not Started | Production Hardening |
+| M16 | Not Started | Cloud Run Deployment |
+
+**Status Legend:** Not Started | In Progress | Complete
+
 ---
 
 ## Milestone 1: Koa Server Foundation
@@ -12,22 +39,22 @@ This document outlines the implementation milestones for the Scion Web Frontend.
 
 ### Deliverables
 
-1. **Project scaffolding**
+- [ ] **Project scaffolding**
    - TypeScript configuration
    - ESLint/Prettier setup
    - Vite build configuration
    - Package.json with dependencies
 
-2. **Koa application core**
+- [ ] **Koa application core**
    - Application entry point (`src/server/index.ts`)
    - Middleware stack (logger, error handler, security headers)
    - Static asset serving from `public/`
 
-3. **Health endpoints**
+- [ ] **Health endpoints**
    - `GET /healthz` - liveness probe
    - `GET /readyz` - readiness probe (initially same as liveness)
 
-4. **Development workflow**
+- [ ] **Development workflow**
    - Hot reload for server changes
    - Vite dev server for client assets
    - npm scripts: `dev`, `build`, `start`
@@ -70,22 +97,22 @@ web/
 
 ### Deliverables
 
-1. **SSR renderer**
+- [ ] **SSR renderer**
    - HTML shell template with hydration script injection
    - Lit component rendering via `@lit-labs/ssr`
    - Initial data serialization (`__SCION_DATA__` script tag)
 
-2. **Basic Lit components (server + client)**
+- [ ] **Basic Lit components (server + client)**
    - `<scion-app>` - application shell
    - `<scion-page-home>` - simple home page
    - `<scion-page-404>` - not found page
 
-3. **Client hydration**
+- [ ] **Client hydration**
    - Client entry point (`src/client/main.ts`)
    - Hydration of SSR content
    - Client-side router setup (@vaadin/router)
 
-4. **Page routes**
+- [ ] **Page routes**
    - `GET /` - home page (SSR)
    - `GET /*` - catch-all for SPA routing
 
@@ -114,23 +141,23 @@ web/
 
 ### Deliverables
 
-1. **Web Awesome integration**
+- [ ] **Web Awesome integration**
    - CDN script/style loading (initial approach)
    - Theme CSS custom properties
    - Component registration verification
 
-2. **Core UI components**
+- [ ] **Core UI components**
    - `<scion-nav>` - sidebar navigation
    - `<scion-header>` - top header bar
    - `<scion-breadcrumb>` - breadcrumb navigation
    - `<scion-status-badge>` - status indicator
 
-3. **Layout system**
+- [ ] **Layout system**
    - Responsive sidebar layout
    - Content area with padding/scrolling
    - Mobile breakpoint handling
 
-4. **Theme configuration**
+- [ ] **Theme configuration**
    - Light/dark mode support
    - CSS custom property overrides
    - Consistent color palette
@@ -161,28 +188,28 @@ web/
 
 ### Deliverables
 
-1. **Session middleware**
+- [ ] **Session middleware**
    - koa-session configuration
    - Secure cookie settings
    - Session store (in-memory for dev, Redis for prod)
 
-2. **OAuth routes**
+- [ ] **OAuth routes**
    - `GET /auth/login/:provider` - initiate OAuth
    - `GET /auth/callback/:provider` - OAuth callback
    - `POST /auth/logout` - clear session
    - `GET /auth/me` - current user info
 
-3. **OAuth providers**
+- [ ] **OAuth providers**
    - Google OAuth 2.0 integration
    - GitHub OAuth integration
    - Provider abstraction for future additions
 
-4. **Auth middleware**
+- [ ] **Auth middleware**
    - `auth()` middleware for protected routes
    - Redirect to login for unauthenticated requests
    - User context injection into SSR
 
-5. **Login UI**
+- [ ] **Login UI**
    - `<scion-login-page>` component
    - Provider selection buttons
    - Error handling/display
@@ -224,23 +251,23 @@ BASE_URL=http://localhost:8080
 
 ### Deliverables
 
-1. **API proxy middleware**
+- [ ] **API proxy middleware**
    - Route `/api/*` to Hub API
    - Forward authentication headers
    - Request/response logging
    - Error transformation
 
-2. **Hub client service**
+- [ ] **Hub client service**
    - Typed API client for server-side calls
    - Request timeout handling
    - Retry logic with backoff
 
-3. **SSR data fetching**
+- [ ] **SSR data fetching**
    - Fetch data during SSR for initial render
    - Pass data to Lit components
    - Error boundary for failed fetches
 
-4. **Mock Hub API (for testing)**
+- [ ] **Mock Hub API (for testing)**
    - Standalone mock server
    - Fixtures for common responses
    - Configurable via environment
@@ -274,22 +301,22 @@ Create a simple mock for development without a real Hub:
 
 ### Deliverables
 
-1. **Grove pages**
+- [ ] **Grove pages**
    - `<scion-grove-list>` - list all groves with filtering
    - `<scion-grove-detail>` - single grove view with agent list
    - Grove card component with status summary
 
-2. **Agent pages**
+- [ ] **Agent pages**
    - `<scion-agent-list>` - agents within a grove
    - `<scion-agent-detail>` - single agent view
    - Agent card component with status, actions
 
-3. **Action handlers**
+- [ ] **Action handlers**
    - Start/stop agent buttons
    - Delete agent with confirmation
    - Create agent dialog (basic)
 
-4. **State management (client)**
+- [ ] **State management (client)**
    - State manager class
    - Hydration from SSR data
    - Optimistic updates
@@ -325,29 +352,29 @@ Create a simple mock for development without a real Hub:
 
 ### Deliverables
 
-1. **NATS client**
+- [ ] **NATS client**
    - Connection management with reconnection
    - Subject subscription/unsubscription
    - Message deserialization
 
-2. **SSE endpoint**
+- [ ] **SSE endpoint**
    - `GET /events` - SSE stream
    - `POST /events/subscribe` - subscribe to subjects
    - Connection tracking per user
    - Heartbeat messages
 
-3. **SSE manager**
+- [ ] **SSE manager**
    - Connection lifecycle management
    - NATS-to-SSE message bridging
    - Subject-based routing
    - Permission filtering
 
-4. **Client SSE handler**
+- [ ] **Client SSE handler**
    - EventSource connection
    - Reconnection with backoff
    - Message parsing and dispatch
 
-5. **Reactive component updates**
+- [ ] **Reactive component updates**
    - State manager integration with SSE
    - Delta merging into local state
    - Lit reactive property updates
@@ -384,23 +411,23 @@ nats pub agent.test123.status '{"status":"running"}'
 
 ### Deliverables
 
-1. **Terminal component**
+- [ ] **Terminal component**
    - `<scion-terminal>` Lit component
    - xterm.js integration with addons (fit, web-links)
    - Theme matching Web Awesome colors
 
-2. **WebSocket connection**
+- [ ] **WebSocket connection**
    - Ticket-based authentication
    - PTY WebSocket proxy through Koa
    - Binary data handling (base64)
 
-3. **Terminal features**
+- [ ] **Terminal features**
    - Auto-resize on container change
    - Connection status indicator
    - Reconnection handling
    - Copy/paste support
 
-4. **Terminal page**
+- [ ] **Terminal page**
    - Full-screen terminal view
    - Toolbar with agent info and actions
    - Back navigation
@@ -435,24 +462,24 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **Create agent dialog**
+- [ ] **Create agent dialog**
    - `<scion-create-agent-dialog>` component
    - Template selector
    - Configuration form (name, task, branch)
    - Advanced options (image, env vars)
 
-2. **Template browser**
+- [ ] **Template browser**
    - List available templates
    - Template detail view
    - Template preview
 
-3. **Creation flow**
+- [ ] **Creation flow**
    - Form validation
    - API submission
    - Progress tracking
    - Error handling
 
-4. **Post-creation navigation**
+- [ ] **Post-creation navigation**
    - Redirect to agent detail
    - Option to open terminal
    - Notification of creation
@@ -478,34 +505,34 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **Template list page**
+- [ ] **Template list page**
    - `<scion-template-list>` - filterable template browser
    - Scope filtering (global/grove/user)
    - Harness type filtering
    - Search functionality
 
-2. **Template detail/viewer**
+- [ ] **Template detail/viewer**
    - `<scion-template-detail>` - template configuration viewer
    - File manifest display
    - Version history (future)
 
-3. **Template card component**
+- [ ] **Template card component**
    - `<scion-template-card>` - template summary card
    - Scope badge display
    - Action buttons (view, clone, delete)
 
-4. **Template upload wizard**
+- [ ] **Template upload wizard**
    - `<scion-template-upload>` - multi-step upload form
    - Metadata entry (name, description, harness)
    - File selection and upload
    - Signed URL upload integration
    - Finalization step
 
-5. **Template scope selector**
+- [ ] **Template scope selector**
    - `<scion-scope-selector>` - reusable scope picker
    - Support for user/grove scopes
 
-6. **Template clone dialog**
+- [ ] **Template clone dialog**
    - Clone to different scope
    - Rename on clone
 
@@ -537,39 +564,39 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **User list page**
+- [ ] **User list page**
    - `<scion-user-list>` - user directory
    - Role/status badges
    - Search and filtering
    - Role modification (admin only)
 
-2. **User detail page**
+- [ ] **User detail page**
    - `<scion-user-detail>` - user profile view
    - Group memberships
    - Recent activity
 
-3. **User avatar component**
+- [ ] **User avatar component**
    - `<scion-user-avatar>` - avatar with fallback
    - Status indicator
 
-4. **Group list page**
+- [ ] **Group list page**
    - `<scion-group-list>` - group directory
    - Member count display
    - Create group button
 
-5. **Group detail page**
+- [ ] **Group detail page**
    - `<scion-group-detail>` - group management
    - Member list with add/remove
    - Group metadata editing
    - Nested group support (display)
 
-6. **Member list component**
+- [ ] **Member list component**
    - `<scion-member-list>` - reusable member table
    - User and group members
    - Role column
    - Remove action
 
-7. **Group badge component**
+- [ ] **Group badge component**
    - `<scion-group-badge>` - group indicator
 
 ### Test Criteria
@@ -602,12 +629,12 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **Policy list page**
+- [ ] **Policy list page**
    - `<scion-policy-list>` - policy directory
    - Scope/effect filtering
    - Principal count display
 
-2. **Policy detail/editor**
+- [ ] **Policy detail/editor**
    - `<scion-policy-editor>` - policy form
    - Scope type selection
    - Resource type selection
@@ -615,16 +642,16 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
    - Effect radio (allow/deny)
    - Priority input
 
-3. **Principal selector**
+- [ ] **Principal selector**
    - `<scion-principal-selector>` - user/group picker
    - Multi-select support
    - Search within selector
 
-4. **Permission badge component**
+- [ ] **Permission badge component**
    - `<scion-permission-badge>` - permission indicator
    - Allow/deny styling
 
-5. **Access evaluation tool**
+- [ ] **Access evaluation tool**
    - `<scion-access-evaluator>` - debug interface
    - Principal selection
    - Resource selection
@@ -661,33 +688,33 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **Environment settings page**
+- [ ] **Environment settings page**
    - `<scion-settings-env>` - env/secrets management
    - Tab: Environment Variables
    - Tab: Secrets
    - Scope selector (user/grove/host)
 
-2. **Env var table**
+- [ ] **Env var table**
    - Key/value display
    - Sensitive value masking
    - Edit/delete actions
 
-3. **Secret table**
+- [ ] **Secret table**
    - Key/metadata display (no values)
    - Version tracking
    - Update/delete actions
 
-4. **Scope selector component**
+- [ ] **Scope selector component**
    - Scope type dropdown
    - Grove/host selector when applicable
 
-5. **Env var editor dialog**
+- [ ] **Env var editor dialog**
    - `<scion-env-var-editor>` - create/edit form
    - Key validation (UPPER_SNAKE_CASE)
    - Sensitive toggle
    - Description field
 
-6. **Secret editor dialog**
+- [ ] **Secret editor dialog**
    - `<scion-secret-editor>` - create/update form
    - Write-only value field
    - Description field
@@ -722,24 +749,24 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **API keys page**
+- [ ] **API keys page**
    - `<scion-api-keys>` - key management
    - Key list table
    - Key prefix display
    - Last used timestamp
    - Expiry display
 
-2. **Create key dialog**
+- [ ] **Create key dialog**
    - Key name input
    - Expiry option
    - Scope selection (future)
 
-3. **Key display alert**
+- [ ] **Key display alert**
    - One-time key display
    - Copy button
    - Warning about single display
 
-4. **Revoke confirmation**
+- [ ] **Revoke confirmation**
    - Confirmation dialog
    - Key name display
 
@@ -769,29 +796,29 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **Security hardening**
+- [ ] **Security hardening**
    - CSRF protection
    - Rate limiting
    - Input sanitization
    - Audit logging
 
-2. **Performance optimization**
+- [ ] **Performance optimization**
    - Asset bundling and minification
    - Gzip/Brotli compression
    - Cache headers configuration
    - Critical CSS inlining
 
-3. **Error handling**
+- [ ] **Error handling**
    - Global error boundary
    - User-friendly error pages
    - Error reporting integration (optional)
 
-4. **Logging and monitoring**
+- [ ] **Logging and monitoring**
    - Structured JSON logging
    - Request ID tracing
    - Metrics endpoint (optional)
 
-5. **Configuration management**
+- [ ] **Configuration management**
    - Environment-based config
    - Secret handling
    - Feature flags
@@ -816,30 +843,30 @@ Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
 
 ### Deliverables
 
-1. **Container image**
+- [ ] **Container image**
    - Multi-stage Dockerfile
    - Minimal production image
    - Non-root user
 
-2. **Cloud Run configuration**
+- [ ] **Cloud Run configuration**
    - Service definition (cloudrun.yaml)
    - Environment variables
    - Secret references
    - Resource limits
 
-3. **CI/CD pipeline**
+- [ ] **CI/CD pipeline**
    - Build on push to main
    - Run tests
    - Build and push image
    - Deploy to Cloud Run
 
-4. **Infrastructure**
+- [ ] **Infrastructure**
    - Secret Manager setup
    - IAM configuration
    - VPC connector (for Hub access)
    - Custom domain (optional)
 
-5. **Monitoring**
+- [ ] **Monitoring**
    - Cloud Run metrics
    - Error reporting
    - Uptime checks
