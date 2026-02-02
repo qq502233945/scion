@@ -92,7 +92,7 @@ type TokenClaims struct {
 - [Agent Authentication](sciontool-auth.md) - Agent-to-Hub secure communication
 - [Server Authentication](server-auth-design.md) - Hub server-side auth handling
 - [Server Auth Setup](server-auth-setup.md) - API keys, dev auth, and security
-- [Runtime Host Auth](runtime-host-auth.md) - Host registration and mutual TLS
+- [Runtime Host Auth](runtime-host-auth.md) - Host registration and HMAC-based authentication
 - [Implementation Milestones](auth-milestones.md) - Phased implementation plan
 
 ## References

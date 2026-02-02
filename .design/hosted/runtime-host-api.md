@@ -61,23 +61,40 @@ The Host runs in one of three modes, affecting API availability:
 
 ### 2.1. Transport Security
 
-- **Mutual TLS (mTLS):** Preferred for cluster-to-cluster communication.
-- **TLS:** Required for all connections; self-signed certs allowed with explicit trust.
+- **TLS:** Required for all connections (minimum TLS 1.2, prefer TLS 1.3)
+- **Certificate Validation:** Required in production; self-signed certs allowed for development with explicit trust
 
 ### 2.2. Authentication Methods
 
-| Method | Use Case | Header |
-|--------|----------|--------|
-| **Bearer Token** | Hub → Host requests | `Authorization: Bearer <token>` |
-| **API Token** | Alternate auth | `X-API-Key: <token>` |
+Runtime Host authentication uses **HMAC-based request signing** as the primary method. This provides mutual authentication between Hub and Runtime Hosts without requiring token transmission after initial registration.
 
-The token is generated when the Host registers with the Hub (see Hub API Section 5.3).
+| Header | Format | Description |
+|--------|--------|-------------|
+| `X-Scion-Host-ID` | UUID or slug | Unique identifier for the Runtime Host |
+| `X-Scion-Timestamp` | RFC 3339 | Request timestamp (e.g., `2025-01-30T12:00:00Z`) |
+| `X-Scion-Nonce` | Base64 (16 bytes) | Random nonce for replay prevention |
+| `X-Scion-Signature` | Base64 (32 bytes) | HMAC-SHA256 signature |
 
-### 2.3. Request Signing (Optional)
+The shared secret is established during host registration (see [Runtime Host Auth](auth/runtime-host-auth.md) Section 3).
 
-For additional security, requests can be signed using HMAC:
-- Header: `X-Scion-Signature: sha256=<hmac>`
-- Signature computed over: `timestamp + method + path + body`
+### 2.3. Request Signing Process
+
+All authenticated requests between Hub and Runtime Host are HMAC-signed:
+
+1. **Build Canonical String:**
+   ```
+   METHOD + "\n" + PATH + "\n" + QUERY (sorted) + "\n" +
+   TIMESTAMP + "\n" + NONCE + "\n" + CONTENT_HASH
+   ```
+
+2. **Compute Signature:** `HMAC-SHA256(shared_secret, canonical_string)`
+
+3. **Verification:**
+   - Clock skew tolerance: 5 minutes
+   - Optional nonce cache for strict replay prevention
+   - Constant-time signature comparison
+
+See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete specification.
 
 ## 3. Host Lifecycle & Events
 

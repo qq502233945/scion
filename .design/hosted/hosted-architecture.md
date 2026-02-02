@@ -148,6 +148,7 @@ The grove is the **primary unit of registration** with the Hub. A grove represen
 A compute node with access to one or more container runtimes. Hosts do not register themselves as standalone entities; instead, they register the groves they serve.
 
 *   **Grove Registration:** On startup (or on-demand), a host registers one or more local groves with the Hub.
+*   **Authentication:** Hosts authenticate with the Hub using HMAC-based request signing, enabling bidirectional trust without token transmission after initial registration. See [Runtime Host Auth](auth/runtime-host-auth.md) for details.
 *   **Runtime Providers:** Access to one or more runtimes:
     *   **Docker/Container:** Local container orchestration
     *   **Kubernetes:** Cluster-based pod orchestration

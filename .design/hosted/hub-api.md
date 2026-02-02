@@ -551,8 +551,13 @@ Upsert endpoint for Runtime Hosts in read-only mode to register locally-created 
 }
 ```
 
-**Headers:**
-- `X-Scion-Host-Token`: Runtime host authentication token
+**Headers (HMAC Authentication):**
+- `X-Scion-Host-ID`: Runtime host identifier
+- `X-Scion-Timestamp`: Request timestamp (RFC 3339)
+- `X-Scion-Nonce`: Random nonce for replay prevention
+- `X-Scion-Signature`: HMAC-SHA256 signature
+
+See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete authentication specification.
 
 **Response:**
 ```json
@@ -852,8 +857,11 @@ Internal endpoint for runtime hosts to report health.
 }
 ```
 
-**Headers:**
-- `X-Scion-Host-Token`: Runtime host authentication token
+**Headers (HMAC Authentication):**
+- `X-Scion-Host-ID`: Runtime host identifier
+- `X-Scion-Timestamp`: Request timestamp (RFC 3339)
+- `X-Scion-Nonce`: Random nonce for replay prevention
+- `X-Scion-Signature`: HMAC-SHA256 signature
 
 ---
 
@@ -1364,10 +1372,14 @@ All error responses follow a consistent format:
    X-Scion-Agent-Token: <token>
    ```
 
-4. **Host Token** (Runtime Host-to-Hub)
+4. **Host HMAC Authentication** (Runtime Host ↔ Hub)
    ```
-   X-Scion-Host-Token: <token>
+   X-Scion-Host-ID: <host-id>
+   X-Scion-Timestamp: <RFC 3339 timestamp>
+   X-Scion-Nonce: <base64-encoded nonce>
+   X-Scion-Signature: <HMAC-SHA256 signature>
    ```
+   See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete specification.
 
 ### 10.2 Authentication Endpoints
 
@@ -1390,18 +1402,21 @@ Role-based access control:
 - **member**: Can create/manage own resources
 - **viewer**: Read-only access to visible resources
 
-### 10.4 Token Lifecycle
+### 10.4 Token and Secret Lifecycle
 
-#### Host Tokens
+#### Host Shared Secrets (HMAC Authentication)
 
-1. **Generation:** When a Runtime Host registers via `POST /runtime-hosts`, the Hub generates a long-lived host token.
-2. **Storage:** The host should store this token securely (e.g., encrypted file, secret manager).
-3. **Rotation:** Hosts can request token rotation without downtime:
+Runtime Hosts authenticate with the Hub using HMAC-based request signing. See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete specification.
+
+1. **Registration:** User creates a host record, receives a short-lived join token
+2. **Join:** Host exchanges join token for a shared secret (one-time transmission)
+3. **Storage:** Host stores secret securely (`~/.scion/host-credentials.json` or secret manager)
+4. **Authentication:** All subsequent requests are HMAC-signed using the shared secret
+5. **Rotation:** Hub initiates secret rotation with grace period for dual-secret validation:
    ```
-   POST /api/v1/runtime-hosts/{hostId}/rotate-token
+   POST /api/v1/secrets/rotate (Hub → Host, over authenticated WebSocket)
    ```
-   Returns a new token; the old token remains valid for 5 minutes to allow graceful transition.
-4. **Revocation:** Deleting a host or calling `/revoke-token` immediately invalidates the token.
+6. **Revocation:** Deleting a host immediately invalidates the shared secret
 
 #### Agent Tokens
 
@@ -1473,11 +1488,15 @@ The control channel is established **after grove registration**. The host must f
 WS /api/v1/runtime-hosts/connect
 ```
 
-Runtime Host initiates a persistent WebSocket connection to the Hub. The host must have already registered at least one grove and obtained a host token.
+Runtime Host initiates a persistent WebSocket connection to the Hub. The host must have already completed the registration flow and obtained a shared secret.
 
-**Headers:**
-- `X-Scion-Host-Token`: Runtime host authentication token (from grove registration)
+**Headers (HMAC Authentication):**
 - `X-Scion-Host-ID`: Host identifier
+- `X-Scion-Timestamp`: Request timestamp (RFC 3339)
+- `X-Scion-Nonce`: Random nonce for replay prevention
+- `X-Scion-Signature`: HMAC-SHA256 signature of the WebSocket upgrade request
+
+Once the WebSocket is established with HMAC authentication, Hub→Host commands over the connection use session-based trust (no per-message signing required). Host→Hub requests that require authorization must use standard HMAC-authenticated HTTP requests. See [Runtime Host Auth](auth/runtime-host-auth.md) Section 10.5 for details.
 
 **Initial Handshake Message (Host → Hub):**
 ```json
