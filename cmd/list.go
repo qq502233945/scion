@@ -77,6 +77,7 @@ func listAgentsViaHub(hubCtx *HubContext) error {
 	defer cancel()
 
 	opts := &hubclient.ListAgentsOptions{}
+	agentSvc := hubCtx.Client.Agents()
 
 	if !listAll {
 		// Get the grove ID for the current project
@@ -85,9 +86,10 @@ func listAgentsViaHub(hubCtx *HubContext) error {
 			return wrapHubError(err)
 		}
 		opts.GroveID = groveID
+		agentSvc = hubCtx.Client.GroveAgents(groveID)
 	}
 
-	resp, err := hubCtx.Client.Agents().List(ctx, opts)
+	resp, err := agentSvc.List(ctx, opts)
 	if err != nil {
 		return wrapHubError(fmt.Errorf("failed to list agents via Hub: %w", err))
 	}

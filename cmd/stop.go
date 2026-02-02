@@ -69,7 +69,16 @@ func stopAgentViaHub(hubCtx *HubContext, agentName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	if err := hubCtx.Client.Agents().Stop(ctx, agentName); err != nil {
+	// Get the grove ID for this project
+	groveID, err := GetGroveID(hubCtx)
+	if err != nil {
+		return wrapHubError(err)
+	}
+
+	// Use grove-scoped client to allow lookup by name/slug
+	agentSvc := hubCtx.Client.GroveAgents(groveID)
+
+	if err := agentSvc.Stop(ctx, agentName); err != nil {
 		return wrapHubError(fmt.Errorf("failed to stop agent via Hub: %w", err))
 	}
 
@@ -78,7 +87,7 @@ func stopAgentViaHub(hubCtx *HubContext, agentName string) error {
 			DeleteFiles:  true,
 			RemoveBranch: false,
 		}
-		if err := hubCtx.Client.Agents().Delete(ctx, agentName, opts); err != nil {
+		if err := agentSvc.Delete(ctx, agentName, opts); err != nil {
 			return wrapHubError(fmt.Errorf("agent stopped but failed to delete via Hub: %w", err))
 		}
 		fmt.Printf("Agent '%s' stopped and removed via Hub.\n", agentName)

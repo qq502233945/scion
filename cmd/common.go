@@ -355,7 +355,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 	}
 	fmt.Printf("%s agent '%s'...\n", action, agentName)
 
-	resp, err := hubCtx.Client.Agents().Create(ctx, req)
+	resp, err := hubCtx.Client.GroveAgents(groveID).Create(ctx, req)
 	if err != nil {
 		return wrapHubError(fmt.Errorf("failed to start agent via Hub: %w", err))
 	}

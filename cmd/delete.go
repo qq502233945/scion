@@ -170,8 +170,8 @@ func deleteAgentViaHub(hubCtx *HubContext, agentName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Use grove-scoped endpoint which supports agent lookup by name/slug
-	if err := hubCtx.Client.Groves().DeleteAgent(ctx, hubCtx.GroveID, agentName, opts); err != nil {
+	// Use grove-scoped client which supports agent lookup by name/slug
+	if err := hubCtx.Client.GroveAgents(hubCtx.GroveID).Delete(ctx, agentName, opts); err != nil {
 		return wrapHubError(fmt.Errorf("failed to delete agent via Hub: %w", err))
 	}
 

@@ -16,6 +16,9 @@ type Client interface {
 	// Agents returns the agent operations interface.
 	Agents() AgentService
 
+	// GroveAgents returns the agent operations interface scoped to a specific grove.
+	GroveAgents(groveID string) AgentService
+
 	// Groves returns the grove operations interface.
 	Groves() GroveService
 
@@ -81,6 +84,11 @@ func New(baseURL string, opts ...Option) (Client, error) {
 // Agents returns the agent operations interface.
 func (c *client) Agents() AgentService {
 	return c.agents
+}
+
+// GroveAgents returns the agent operations interface scoped to a specific grove.
+func (c *client) GroveAgents(groveID string) AgentService {
+	return &agentService{c: c, groveID: groveID}
 }
 
 // Groves returns the grove operations interface.

@@ -120,7 +120,7 @@ func createAgentViaHub(hubCtx *HubContext, agentName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	resp, err := hubCtx.Client.Agents().Create(ctx, req)
+	resp, err := hubCtx.Client.GroveAgents(groveID).Create(ctx, req)
 	if err != nil {
 		return wrapHubError(fmt.Errorf("failed to create agent via Hub: %w", err))
 	}

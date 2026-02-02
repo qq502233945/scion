@@ -46,7 +46,22 @@ type AgentService interface {
 
 // agentService is the implementation of AgentService.
 type agentService struct {
-	c *client
+	c       *client
+	groveID string
+}
+
+func (s *agentService) agentPath(agentID string) string {
+	if s.groveID != "" {
+		return "/api/v1/groves/" + s.groveID + "/agents/" + agentID
+	}
+	return "/api/v1/agents/" + agentID
+}
+
+func (s *agentService) agentsPath() string {
+	if s.groveID != "" {
+		return "/api/v1/groves/" + s.groveID + "/agents"
+	}
+	return "/api/v1/agents"
 }
 
 // ListAgentsOptions configures agent list filtering.
@@ -131,7 +146,7 @@ func (s *agentService) List(ctx context.Context, opts *ListAgentsOptions) (*List
 		opts.Page.ToQuery(query)
 	}
 
-	resp, err := s.c.transport.GetWithQuery(ctx, "/api/v1/agents", query, nil)
+	resp, err := s.c.transport.GetWithQuery(ctx, s.agentsPath(), query, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +173,7 @@ func (s *agentService) List(ctx context.Context, opts *ListAgentsOptions) (*List
 
 // Get returns a single agent by ID.
 func (s *agentService) Get(ctx context.Context, agentID string) (*Agent, error) {
-	resp, err := s.c.transport.Get(ctx, "/api/v1/agents/"+agentID, nil)
+	resp, err := s.c.transport.Get(ctx, s.agentPath(agentID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +182,7 @@ func (s *agentService) Get(ctx context.Context, agentID string) (*Agent, error) 
 
 // Create creates a new agent.
 func (s *agentService) Create(ctx context.Context, req *CreateAgentRequest) (*CreateAgentResponse, error) {
-	resp, err := s.c.transport.Post(ctx, "/api/v1/agents", req, nil)
+	resp, err := s.c.transport.Post(ctx, s.agentsPath(), req, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +191,7 @@ func (s *agentService) Create(ctx context.Context, req *CreateAgentRequest) (*Cr
 
 // Update updates an agent's metadata.
 func (s *agentService) Update(ctx context.Context, agentID string, req *UpdateAgentRequest) (*Agent, error) {
-	resp, err := s.c.transport.Patch(ctx, "/api/v1/agents/"+agentID, req, nil)
+	resp, err := s.c.transport.Patch(ctx, s.agentPath(agentID), req, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +200,7 @@ func (s *agentService) Update(ctx context.Context, agentID string, req *UpdateAg
 
 // Delete removes an agent.
 func (s *agentService) Delete(ctx context.Context, agentID string, opts *DeleteAgentOptions) error {
-	path := "/api/v1/agents/" + agentID
+	path := s.agentPath(agentID)
 	if opts != nil {
 		query := url.Values{}
 		if opts.DeleteFiles {
@@ -208,7 +223,7 @@ func (s *agentService) Delete(ctx context.Context, agentID string, opts *DeleteA
 
 // Start starts a stopped agent.
 func (s *agentService) Start(ctx context.Context, agentID string) error {
-	resp, err := s.c.transport.Post(ctx, "/api/v1/agents/"+agentID+"/start", nil, nil)
+	resp, err := s.c.transport.Post(ctx, s.agentPath(agentID)+"/start", nil, nil)
 	if err != nil {
 		return err
 	}
@@ -217,7 +232,7 @@ func (s *agentService) Start(ctx context.Context, agentID string) error {
 
 // Stop stops a running agent.
 func (s *agentService) Stop(ctx context.Context, agentID string) error {
-	resp, err := s.c.transport.Post(ctx, "/api/v1/agents/"+agentID+"/stop", nil, nil)
+	resp, err := s.c.transport.Post(ctx, s.agentPath(agentID)+"/stop", nil, nil)
 	if err != nil {
 		return err
 	}
@@ -226,7 +241,7 @@ func (s *agentService) Stop(ctx context.Context, agentID string) error {
 
 // Restart restarts an agent.
 func (s *agentService) Restart(ctx context.Context, agentID string) error {
-	resp, err := s.c.transport.Post(ctx, "/api/v1/agents/"+agentID+"/restart", nil, nil)
+	resp, err := s.c.transport.Post(ctx, s.agentPath(agentID)+"/restart", nil, nil)
 	if err != nil {
 		return err
 	}
@@ -242,7 +257,7 @@ func (s *agentService) SendMessage(ctx context.Context, agentID string, message 
 		Message:   message,
 		Interrupt: interrupt,
 	}
-	resp, err := s.c.transport.Post(ctx, "/api/v1/agents/"+agentID+"/message", body, nil)
+	resp, err := s.c.transport.Post(ctx, s.agentPath(agentID)+"/message", body, nil)
 	if err != nil {
 		return err
 	}
@@ -258,7 +273,7 @@ func (s *agentService) Exec(ctx context.Context, agentID string, command []strin
 		Command: command,
 		Timeout: timeout,
 	}
-	resp, err := s.c.transport.Post(ctx, "/api/v1/agents/"+agentID+"/exec", body, nil)
+	resp, err := s.c.transport.Post(ctx, s.agentPath(agentID)+"/exec", body, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +292,7 @@ func (s *agentService) GetLogs(ctx context.Context, agentID string, opts *GetLog
 		}
 	}
 
-	resp, err := s.c.transport.GetWithQuery(ctx, "/api/v1/agents/"+agentID+"/logs", query, nil)
+	resp, err := s.c.transport.GetWithQuery(ctx, s.agentPath(agentID)+"/logs", query, nil)
 	if err != nil {
 		return "", err
 	}

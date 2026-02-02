@@ -327,7 +327,7 @@ func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error)
 		RuntimeHostID: hubCtx.HostID,
 	}
 
-	resp, err := hubCtx.Client.Agents().List(ctxTimeout, opts)
+	resp, err := hubCtx.Client.GroveAgents(hubCtx.GroveID).List(ctxTimeout, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Hub agents: %w", err)
 	}
@@ -397,7 +397,7 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult) er
 			GroveID:       hubCtx.GroveID,
 			RuntimeHostID: hubCtx.HostID,
 		}
-		resp, err := hubCtx.Client.Agents().Create(ctxTimeout, req)
+		resp, err := hubCtx.Client.GroveAgents(hubCtx.GroveID).Create(ctxTimeout, req)
 		if err != nil {
 			debugf("Failed to register agent '%s': %v", name, err)
 			return fmt.Errorf("failed to register agent '%s': %w", name, err)
