@@ -3,11 +3,24 @@ title: Authentication & Identity
 description: Configuring authentication flows for Scion.
 ---
 
+Scion implements a unified authentication system designed to secure communication between all components: the CLI, the Web Dashboard, the Hub, and individual Agents.
+
+## Identity Types
+
+Scion recognizes four primary identity types:
+
+1.  **Users**: Humans interacting via the CLI or Web Dashboard. Authenticated via OAuth or Development tokens.
+2.  **Agents**: Running LLM instances. Authenticated via short-lived JWTs issued by the Hub during provisioning.
+3.  **Runtime Hosts**: Infrastructure nodes that execute agents. Authenticated via Host tokens.
+4.  **Development User**: A special identity used for local development and zero-config testing.
+
+## Authentication Methods
+
 Scion supports multiple authentication methods for different use cases:
 
-- **OAuth (Google/GitHub)**: For production web and CLI authentication
-- **Development Auth**: For local development and testing
-- **API Keys**: For programmatic access and CI/CD pipelines
+- **OAuth (Google/GitHub)**: For production web and CLI authentication.
+- **Development Auth**: For local development and testing.
+- **API Keys**: For programmatic access and CI/CD pipelines.
 
 ## OAuth Authentication
 
@@ -59,78 +72,56 @@ auth:
 
 ### Behavior
 
-- **Empty list (default)**: All email domains are allowed
-- **Non-empty list**: Only emails from listed domains can authenticate
-- **Case insensitive**: `Example.COM` matches `example.com`
-- **Exact match**: Subdomains must be listed explicitly (`sub.example.com` does not match `example.com`)
+- **Empty list (default)**: All email domains are allowed.
+- **Non-empty list**: Only emails from listed domains can authenticate.
+- **Case insensitive**: `Example.COM` matches `example.com`.
+- **Exact match**: Subdomains must be listed explicitly.
 
-### Enforcement
+## Development Authentication (Dev Auth)
 
-Domain authorization is enforced at multiple layers:
-
-1. **Web Frontend**: Checked during OAuth callback before creating a session
-2. **Hub API**: Checked at login/token endpoints before issuing tokens
-
-If a user's email domain is not authorized, they receive an error message.
-
-## Development Authentication
-
-For local development and testing, Scion provides a zero-configuration authentication mode.
+To minimize friction during local setup, Scion includes a "Dev Auth" mode. When enabled, the Hub auto-generates a token and creates a "Development User" identity.
 
 ### Enabling Dev Auth
+Start the server with the `--dev-auth` flag or set it in your `server.yaml`:
 
-Start the server with the `--dev-auth` flag:
+```yaml
+auth:
+  devMode: true
+```
 
+Or via environment variable:
 ```bash
-scion server start --enable-hub --dev-auth
-```
-
-The server will generate a token and display it:
-
-```
-WARNING: Development authentication enabled - not for production use
-Dev token: scion_dev_a1b2c3d4e5f6789012345678901234567890abcd
-
-To authenticate CLI commands, run:
-  export SCION_DEV_TOKEN=scion_dev_a1b2c3d4e5f6789012345678901234567890abcd
+export SCION_SERVER_AUTH_DEVMODE=true
 ```
 
 ### Using the Dev Token
+When the Hub starts with `devMode: true`, it writes the token to `~/.scion/dev-token`.
+- **CLI**: The `scion` CLI automatically looks for this file.
+- **Web**: The Web Dashboard automatically uses this token for the "Development User" login when `SCION_DEV_AUTH_ENABLED=true` is set.
 
+Alternatively, you can set the token in your environment:
 ```bash
-# Set the token in your environment
 export SCION_DEV_TOKEN=scion_dev_...
-
-# CLI commands will automatically use it
-scion hub status
 ```
 
-The token is also saved to `~/.scion/dev-token` for automatic resolution.
+## CLI Authentication
+
+Users can authenticate the CLI against a Scion Hub using the following flow:
+
+1.  **Login**: `scion hub login` opens a browser to the dashboard login page.
+2.  **Exchange**: After successful login, the dashboard provides a token (or the CLI exchanges a code).
+3.  **Storage**: The token is stored in `~/.scion/config.json`.
+
+## Agent Authentication
+
+Agents are automatically authenticated. When the Hub dispatches an agent to a Runtime Host, it includes a one-time-use **Agent Token**.
+- The agent uses this token for all calls back to the Hub (e.g., updating status, streaming logs).
+- Tokens are scoped to the specific agent and its grove.
+- Tokens have a default expiration (typically 24 hours).
 
 ## API Keys
 
-For programmatic access, users can create API keys through the web dashboard or CLI.
-
-### Creating an API Key
-
-```bash
-scion auth api-key create --name "CI Pipeline"
-```
-
-### Using an API Key
-
-```bash
-# Via Authorization header
-curl -H "Authorization: Bearer sk_live_..." https://hub.example.com/api/v1/agents
-
-# Via X-API-Key header
-curl -H "X-API-Key: sk_live_..." https://hub.example.com/api/v1/agents
-```
-
-## Security Best Practices
-
-1. **Use OAuth in production** - Dev auth is for development only
-2. **Configure authorized domains** - Restrict access to your organization's email domains
-3. **Use HTTPS** - All authentication should occur over encrypted connections
-4. **Rotate API keys** - Periodically rotate API keys for long-running integrations
-5. **Limit API key scopes** - Grant only necessary permissions to API keys
+For programmatic access (e.g., CI/CD pipelines), the Hub supports API Keys.
+- Keys can be generated via the Web Dashboard or CLI.
+- Keys are prefixed with `sk_live_` or `sk_test_`.
+- Use the `Authorization: Bearer <key>` header or `X-API-Key` header in your requests.
