@@ -140,6 +140,11 @@ type Server struct {
 	heartbeat          *HeartbeatService
 	hostCredentials    *hostcredentials.HostCredentials
 
+	// Credential watching
+	credentialsStore   *hostcredentials.Store
+	credentialsModTime time.Time
+	credWatcherStop    chan struct{}
+
 	// Control channel
 	controlChannel *ControlChannelClient
 }
@@ -261,17 +266,18 @@ func (s *Server) loadHostCredentials() error {
 		credPath = hostcredentials.DefaultPath()
 	}
 
-	store := hostcredentials.NewStore(credPath)
-	if !store.Exists() {
+	s.credentialsStore = hostcredentials.NewStore(credPath)
+	if !s.credentialsStore.Exists() {
 		return nil // No credentials file, not an error
 	}
 
-	creds, err := store.Load()
+	creds, err := s.credentialsStore.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load host credentials: %w", err)
 	}
 
 	s.hostCredentials = creds
+	s.credentialsModTime = s.credentialsStore.ModTime()
 	log.Printf("Host credentials loaded (hostID: %s, hub: %s)", creds.HostID, creds.HubEndpoint)
 	return nil
 }
@@ -389,6 +395,11 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start credential watcher for dynamic reload
+	if s.config.HubEnabled && s.credentialsStore != nil {
+		s.startCredentialWatcher(ctx)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -411,7 +422,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	srv := s.httpServer
 	hb := s.heartbeat
 	cc := s.controlChannel
+	credWatcherStop := s.credWatcherStop
 	s.mu.RUnlock()
+
+	// Stop credential watcher
+	if credWatcherStop != nil {
+		log.Println("Stopping credential watcher...")
+		close(credWatcherStop)
+	}
 
 	// Stop control channel first
 	if cc != nil {
@@ -441,6 +459,167 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // This is useful for testing without starting a listener.
 func (s *Server) Handler() http.Handler {
 	return s.applyMiddleware(s.mux)
+}
+
+// startCredentialWatcher starts a goroutine that watches for credential file changes.
+// When credentials change, it reinitializes the Hub client and restarts services.
+func (s *Server) startCredentialWatcher(ctx context.Context) {
+	if s.credentialsStore == nil {
+		log.Printf("[Host:CredWatcher] No credentials store configured, skipping watcher")
+		return
+	}
+
+	s.credWatcherStop = make(chan struct{})
+	go s.credentialWatchLoop(ctx)
+	log.Printf("[Host:CredWatcher] Started (checking every 10s)")
+}
+
+// credentialWatchLoop is the main credential watching loop.
+func (s *Server) credentialWatchLoop(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.credWatcherStop:
+			return
+		case <-ticker.C:
+			if err := s.checkAndReloadCredentials(ctx); err != nil {
+				log.Printf("[Host:CredWatcher] Error checking credentials: %v", err)
+			}
+		}
+	}
+}
+
+// checkAndReloadCredentials checks if credentials have changed and reloads if necessary.
+func (s *Server) checkAndReloadCredentials(ctx context.Context) error {
+	if s.credentialsStore == nil {
+		return nil
+	}
+
+	creds, modTime, err := s.credentialsStore.LoadIfChanged(s.credentialsModTime)
+	if err != nil {
+		return fmt.Errorf("failed to check credentials: %w", err)
+	}
+
+	if creds == nil {
+		return nil // No change
+	}
+
+	log.Printf("[Host:CredWatcher] Credentials changed, reloading (new hostID: %s)", creds.HostID)
+
+	s.mu.Lock()
+	oldCredentials := s.hostCredentials
+	s.hostCredentials = creds
+	s.credentialsModTime = modTime
+	s.mu.Unlock()
+
+	// Check if host ID or secret key changed (requiring service restart)
+	hostIDChanged := oldCredentials == nil || oldCredentials.HostID != creds.HostID
+	secretKeyChanged := oldCredentials == nil || oldCredentials.SecretKey != creds.SecretKey
+
+	if hostIDChanged || secretKeyChanged {
+		if err := s.reinitializeHubServices(ctx, creds); err != nil {
+			log.Printf("[Host:CredWatcher] Failed to reinitialize services: %v", err)
+			return err
+		}
+		log.Printf("[Host:CredWatcher] Services reinitialized with new credentials")
+	}
+
+	return nil
+}
+
+// reinitializeHubServices stops and restarts the Hub client, heartbeat, and control channel.
+func (s *Server) reinitializeHubServices(ctx context.Context, creds *hostcredentials.HostCredentials) error {
+	// Decode the secret key
+	secretKey, err := base64.StdEncoding.DecodeString(creds.SecretKey)
+	if err != nil {
+		return fmt.Errorf("failed to decode secret key: %w", err)
+	}
+
+	// Stop existing services
+	s.mu.Lock()
+	if s.controlChannel != nil {
+		log.Printf("[Host:CredWatcher] Stopping control channel for reload")
+		s.controlChannel.Close()
+		s.controlChannel = nil
+	}
+	if s.heartbeat != nil {
+		log.Printf("[Host:CredWatcher] Stopping heartbeat for reload")
+		s.heartbeat.Stop()
+		s.heartbeat = nil
+	}
+	s.mu.Unlock()
+
+	// Create new Hub client with updated credentials
+	opts := []hubclient.Option{
+		hubclient.WithHMACAuth(creds.HostID, secretKey),
+	}
+	client, err := hubclient.New(s.config.HubEndpoint, opts...)
+	if err != nil {
+		return fmt.Errorf("failed to create Hub client: %w", err)
+	}
+
+	s.mu.Lock()
+	s.hubClient = client
+	s.config.HostID = creds.HostID // Update HostID in config
+	if s.cache != nil {
+		s.hydrator = templatecache.NewHydrator(s.cache, client)
+	}
+	log.Printf("[Host:CredWatcher] Hub client reinitialized with HMAC auth (hostID: %s)", creds.HostID)
+	s.mu.Unlock()
+
+	// Restart heartbeat if enabled
+	if s.config.HeartbeatEnabled && s.config.HostID != "" {
+		interval := s.config.HeartbeatInterval
+		if interval <= 0 {
+			interval = DefaultHeartbeatInterval
+		}
+
+		s.mu.Lock()
+		s.heartbeat = NewHeartbeatService(
+			client.RuntimeHosts(),
+			creds.HostID,
+			interval,
+			s.manager,
+		)
+		s.heartbeat.SetVersion(s.version)
+		s.heartbeat.Start(ctx)
+		s.mu.Unlock()
+		log.Printf("[Host:CredWatcher] Heartbeat restarted (interval: %s)", interval)
+	}
+
+	// Restart control channel if enabled
+	if s.config.ControlChannelEnabled && s.config.HubEndpoint != "" {
+		ccConfig := ControlChannelConfig{
+			HubEndpoint:         s.config.HubEndpoint,
+			HostID:              creds.HostID,
+			SecretKey:           secretKey,
+			Version:             s.version,
+			ReconnectInitial:    1 * time.Second,
+			ReconnectMax:        60 * time.Second,
+			ReconnectMultiplier: 2.0,
+			PingInterval:        30 * time.Second,
+			PongWait:            60 * time.Second,
+			WriteWait:           10 * time.Second,
+			Debug:               s.config.Debug,
+		}
+
+		s.mu.Lock()
+		s.controlChannel = NewControlChannelClient(ccConfig, s.Handler())
+		s.mu.Unlock()
+
+		go func() {
+			if err := s.controlChannel.Connect(ctx); err != nil {
+				log.Printf("[Host:ControlChannel] Error after reload: %v", err)
+			}
+		}()
+		log.Printf("[Host:CredWatcher] Control channel restarted")
+	}
+
+	return nil
 }
 
 // registerRoutes sets up all API routes.

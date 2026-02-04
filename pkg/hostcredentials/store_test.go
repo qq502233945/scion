@@ -341,3 +341,108 @@ func TestStore_JSONFormat(t *testing.T) {
 		t.Errorf("hubEndpoint mismatch in JSON: %v", parsed["hubEndpoint"])
 	}
 }
+
+func TestStore_ModTime(t *testing.T) {
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "host-credentials.json")
+	store := NewStore(credPath)
+
+	// ModTime should return zero for non-existent file
+	modTime := store.ModTime()
+	if !modTime.IsZero() {
+		t.Errorf("Expected zero time for non-existent file, got %v", modTime)
+	}
+
+	// Create the file
+	creds := &HostCredentials{
+		HostID:    "test-host",
+		SecretKey: "dGVzdC1zZWNyZXQ=",
+	}
+	if err := store.Save(creds); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// ModTime should now return a non-zero time
+	modTime = store.ModTime()
+	if modTime.IsZero() {
+		t.Error("Expected non-zero time for existing file")
+	}
+
+	// ModTime should be recent (within last minute)
+	if time.Since(modTime) > time.Minute {
+		t.Errorf("ModTime %v is not recent", modTime)
+	}
+}
+
+func TestStore_LoadIfChanged(t *testing.T) {
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "host-credentials.json")
+	store := NewStore(credPath)
+
+	// LoadIfChanged on non-existent file should return nil
+	creds, modTime, err := store.LoadIfChanged(time.Time{})
+	if err != nil {
+		t.Fatalf("LoadIfChanged failed for non-existent file: %v", err)
+	}
+	if creds != nil {
+		t.Error("Expected nil credentials for non-existent file")
+	}
+
+	// Create initial credentials
+	initialCreds := &HostCredentials{
+		HostID:    "host-v1",
+		SecretKey: "c2VjcmV0LXYx",
+	}
+	if err := store.Save(initialCreds); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// First load with zero time should return credentials
+	creds, modTime, err = store.LoadIfChanged(time.Time{})
+	if err != nil {
+		t.Fatalf("LoadIfChanged failed: %v", err)
+	}
+	if creds == nil {
+		t.Fatal("Expected credentials on first load")
+	}
+	if creds.HostID != "host-v1" {
+		t.Errorf("Expected host-v1, got %s", creds.HostID)
+	}
+	if modTime.IsZero() {
+		t.Error("Expected non-zero mod time")
+	}
+
+	// LoadIfChanged with same mod time should return nil (no change)
+	creds, _, err = store.LoadIfChanged(modTime)
+	if err != nil {
+		t.Fatalf("LoadIfChanged failed: %v", err)
+	}
+	if creds != nil {
+		t.Error("Expected nil credentials when unchanged")
+	}
+
+	// Update the file
+	time.Sleep(10 * time.Millisecond) // Ensure different mod time
+	updatedCreds := &HostCredentials{
+		HostID:    "host-v2",
+		SecretKey: "c2VjcmV0LXYy",
+	}
+	if err := store.Save(updatedCreds); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// LoadIfChanged with old mod time should return new credentials
+	creds, newModTime, err := store.LoadIfChanged(modTime)
+	if err != nil {
+		t.Fatalf("LoadIfChanged failed: %v", err)
+	}
+	if creds == nil {
+		t.Fatal("Expected credentials after file update")
+	}
+	if creds.HostID != "host-v2" {
+		t.Errorf("Expected host-v2, got %s", creds.HostID)
+	}
+	if !newModTime.After(modTime) {
+		t.Error("Expected new mod time to be after old mod time")
+	}
+}

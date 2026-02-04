@@ -44,10 +44,11 @@ const (
 // UnifiedAuthMiddleware creates middleware that handles all authentication types.
 // It processes tokens in priority order:
 // 1. Agent tokens (X-Scion-Agent-Token or agent JWT in Bearer)
-// 2. Development tokens (scion_dev_* prefix)
-// 3. API keys (sk_live_* or sk_test_* prefix)
-// 4. User JWTs
-// 5. Trusted proxy headers
+// 2. Host HMAC auth (X-Scion-Host-ID header) - passed through to HostAuthMiddleware
+// 3. Development tokens (scion_dev_* prefix)
+// 4. API keys (sk_live_* or sk_test_* prefix)
+// 5. User JWTs
+// 6. Trusted proxy headers
 func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
 	// Parse trusted proxy CIDRs
 	trustedNets := parseTrustedProxies(cfg.TrustedProxies)
@@ -98,7 +99,17 @@ func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
 				// Bearer token wasn't an agent token, continue to user auth
 			}
 
-			// Step 2: Extract bearer token
+			// Step 2: Check for host HMAC authentication (X-Scion-Host-ID header)
+			// If present, pass through to HostAuthMiddleware which runs next
+			if hostID := r.Header.Get("X-Scion-Host-ID"); hostID != "" {
+				if cfg.Debug {
+					log.Printf("[Auth] Host auth headers present (hostID: %s), deferring to HostAuthMiddleware", hostID)
+				}
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Step 3: Extract bearer token
 			token := extractBearerToken(r)
 			if token == "" {
 				// Check for trusted proxy headers
@@ -119,7 +130,7 @@ func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Step 3: Detect token type and validate
+			// Step 4: Detect token type and validate
 			switch detectTokenType(token) {
 			case tokenTypeDev:
 				if !cfg.DevAuthEnabled {

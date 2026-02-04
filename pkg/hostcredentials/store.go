@@ -185,3 +185,37 @@ func (s *Store) SaveFromJoinResponse(hostID, secretKey, hubEndpoint string) erro
 	}
 	return s.Save(creds)
 }
+
+// ModTime returns the modification time of the credentials file.
+// Returns zero time if the file doesn't exist or can't be stat'd.
+func (s *Store) ModTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	info, err := os.Stat(s.path)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
+// LoadIfChanged loads credentials if the file has been modified since lastModTime.
+// Returns the new credentials and mod time if changed, or nil if unchanged.
+func (s *Store) LoadIfChanged(lastModTime time.Time) (*HostCredentials, time.Time, error) {
+	currentModTime := s.ModTime()
+	if currentModTime.IsZero() {
+		return nil, time.Time{}, nil // File doesn't exist
+	}
+
+	// Check if file has been modified (including if lastModTime was zero)
+	if !lastModTime.IsZero() && !currentModTime.After(lastModTime) {
+		return nil, lastModTime, nil // No change
+	}
+
+	creds, err := s.Load()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+
+	return creds, currentModTime, nil
+}
