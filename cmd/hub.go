@@ -302,6 +302,7 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 				"id":          authInfo.OAuthCreds.User.ID,
 				"email":       authInfo.OAuthCreds.User.Email,
 				"displayName": authInfo.OAuthCreds.User.DisplayName,
+				"role":        authInfo.OAuthCreds.User.Role,
 			}
 			if !authInfo.OAuthCreds.ExpiresAt.IsZero() {
 				status["authExpires"] = authInfo.OAuthCreds.ExpiresAt.Format(time.RFC3339)
@@ -363,6 +364,9 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 		if authInfo.HasOAuth && authInfo.OAuthCreds != nil {
 			if authInfo.OAuthCreds.User != nil {
 				fmt.Printf("User:       %s (%s)\n", authInfo.OAuthCreds.User.DisplayName, authInfo.OAuthCreds.User.Email)
+				if authInfo.OAuthCreds.User.Role != "" {
+					fmt.Printf("Role:       %s\n", authInfo.OAuthCreds.User.Role)
+				}
 			}
 			if !authInfo.OAuthCreds.ExpiresAt.IsZero() {
 				if time.Now().After(authInfo.OAuthCreds.ExpiresAt) {
@@ -398,7 +402,7 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 				meCtx, meCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer meCancel()
 				if user, err := client.Auth().Me(meCtx); err == nil {
-					fmt.Printf("\nAuthenticated as: %s (%s)\n", user.DisplayName, user.Email)
+					fmt.Printf("\nAuthenticated as: %s (%s) [%s]\n", user.DisplayName, user.Email, user.Role)
 				} else {
 					fmt.Printf("\nAuth verification: failed (%s)\n", err)
 					fmt.Println("Run 'scion hub auth login' to re-authenticate.")

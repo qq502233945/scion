@@ -48,6 +48,7 @@ type User struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	DisplayName string `json:"displayName"`
+	Role        string `json:"role,omitempty"`
 }
 
 // TokenResponse represents the response from token exchange or refresh.

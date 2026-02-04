@@ -124,6 +124,7 @@ func runHubAuthLogin(cmd *cobra.Command, args []string) error {
 			ID:          tokenResp.User.ID,
 			Email:       tokenResp.User.Email,
 			DisplayName: tokenResp.User.DisplayName,
+			Role:        tokenResp.User.Role,
 		}
 	}
 
@@ -134,7 +135,11 @@ func runHubAuthLogin(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\nAuthentication successful!")
 	if credToken.User != nil {
-		fmt.Printf("Logged in as: %s (%s)\n", credToken.User.DisplayName, credToken.User.Email)
+		if credToken.User.Role != "" {
+			fmt.Printf("Logged in as: %s (%s) [%s]\n", credToken.User.DisplayName, credToken.User.Email, credToken.User.Role)
+		} else {
+			fmt.Printf("Logged in as: %s (%s)\n", credToken.User.DisplayName, credToken.User.Email)
+		}
 	}
 
 	return nil
