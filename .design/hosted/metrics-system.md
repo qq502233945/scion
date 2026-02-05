@@ -824,3 +824,64 @@ telemetry:
 
 **Details:**
 - This is now captured in Section 9.3 (OTel Log Bridge Architecture).
+
+---
+
+## 12. Engineering Milestones
+
+### Milestone 1: Telemetry Foundation (Sciontool)
+
+**Goal:** Enable `sciontool` to accept OTLP data and forward it to the Google Cloud backend.
+
+**Deliverables:**
+- [ ] **OTLP Receiver**: Embedded receiver in `sciontool` listening on default ports (4317/4318).
+- [ ] **Cloud Forwarder**: Exporter for Google Cloud Trace/Monitoring/Logging.
+- [ ] **Configuration**: `telemetry` config block parsing and environment variable injection.
+- [ ] **Basic Filtering**: Implementation of include/exclude logic for event types.
+
+**Test Criteria:**
+- `sciontool` starts without errors with telemetry enabled.
+- Can send dummy OTLP data (via `otel-cli` or similar) to localhost:4317.
+- Dummy data appears in Google Cloud Console (Trace/Log Viewer).
+
+### Milestone 2: Harness Data & Log Bridge
+
+**Goal:** Normalize data from harnesses and system components into the telemetry stream.
+
+**Deliverables:**
+- [ ] **Hook Normalization**: Dialect parsers for converting harness hooks to `agent.*` events.
+- [ ] **Session Parsing**: Logic to parse Gemini CLI `session-*.json` files on session end.
+- [ ] **Log Bridge**: `otelslog` integration for Hub and Runtime Host structured logging.
+- [ ] **Attribute Redaction**: Privacy filter implementation for sensitive fields.
+
+**Test Criteria:**
+- Run a Gemini agent session: tool calls appear as spans in GCP Trace.
+- Agent logs (stdout/stderr) appear in GCP Logging with correct `agent_id` labels.
+- Sensitive data (prompts) is redacted or absent based on config.
+
+### Milestone 3: Hub Reporting & Storage
+
+**Goal:** Aggregate session data and persist it to the Hub for state management.
+
+**Deliverables:**
+- [ ] **Aggregation Engine**: In-memory accumulation of session stats in `sciontool` (token counts, tool usage).
+- [ ] **Hub Protocol**: Extension of daemon heartbeat/status updates to carry metrics payloads.
+- [ ] **Hub Database**: Schema migration for the `agent_session_metrics` table.
+- [ ] **Hub Ingestion**: Logic in Hub to receive metrics payloads and write to DB.
+
+**Test Criteria:**
+- Upon agent session completion, a row is created in `agent_session_metrics`.
+- Token counts and tool usage statistics in the DB match the actual session activity.
+
+### Milestone 4: Hub API & Web UI
+
+**Goal:** Expose and visualize metrics in the user interface.
+
+**Deliverables:**
+- [ ] **Hub API**: Endpoints for retrieving session (`GET /metrics/session/{id}`) and agent summaries.
+- [ ] **Web UI Component**: Session detail view showing token usage and cost estimates.
+- [ ] **Web UI Dashboard**: Agent list view showing aggregate activity stats.
+
+**Test Criteria:**
+- Web UI "Session" tab displays correct token usage for a completed session.
+- Agent list displays accurate "Total Tokens" or "Last Active" metrics.
