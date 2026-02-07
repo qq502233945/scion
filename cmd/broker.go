@@ -185,7 +185,7 @@ Examples:
 var brokerStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Runtime Broker status",
-	Long: `Show the current status of the Runtime Broker.
+	Long: `Show the current status of a Runtime Broker.
 
 This command displays:
 - Whether the broker server is running (daemon or foreground)
@@ -193,12 +193,18 @@ This command displays:
 - Groves this broker provides for
 - Connection status to the Hub
 
+If --broker is not specified, shows the local broker status.
+If --broker is specified, queries the Hub for the remote broker's status.
+
 Examples:
-  # Show broker status
+  # Show local broker status
   scion broker status
 
-  # Show broker status in JSON format
-  scion broker status --json`,
+  # Show local broker status in JSON format
+  scion broker status --json
+
+  # Show status of a remote broker
+  scion broker status --broker <broker-id>`,
 	RunE: runBrokerStatus,
 }
 
@@ -231,6 +237,7 @@ func init() {
 
 	// Status flags
 	brokerStatusCmd.Flags().BoolVar(&brokerStatusJSON, "json", false, "Output in JSON format")
+	brokerStatusCmd.Flags().StringVar(&brokerBrokerID, "broker", "", "Broker ID to query (for remote broker status)")
 
 	// Register flags
 	brokerRegisterCmd.Flags().BoolVar(&brokerForceRegister, "force", false, "Force re-registration even if already registered")
@@ -921,6 +928,11 @@ func runBrokerWithdraw(cmd *cobra.Command, args []string) error {
 }
 
 func runBrokerStatus(cmd *cobra.Command, args []string) error {
+	// If --broker flag is provided, show remote broker status
+	if brokerBrokerID != "" {
+		return runRemoteBrokerStatus(brokerBrokerID)
+	}
+
 	// Get global directory for daemon files
 	globalDir, err := config.GetGlobalDir()
 	if err != nil {
@@ -1087,6 +1099,100 @@ func runBrokerStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("-----------------")
 		fmt.Printf("  (none)\n")
 		fmt.Printf("\n  Run 'scion broker provide' to add this broker as a provider for a grove.\n")
+	}
+
+	return nil
+}
+
+// runRemoteBrokerStatus fetches and displays status for a remote broker from the Hub
+func runRemoteBrokerStatus(brokerID string) error {
+	// Load settings for Hub client
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Fetch broker info from Hub
+	broker, err := client.RuntimeBrokers().Get(ctx, brokerID)
+	if err != nil {
+		if apiclient.IsNotFoundError(err) {
+			return fmt.Errorf("broker '%s' not found on Hub", brokerID)
+		}
+		return fmt.Errorf("failed to fetch broker: %w", err)
+	}
+
+	// Collect status information
+	status := brokerStatusInfo{
+		Registered:    true,
+		BrokerID:      broker.ID,
+		BrokerName:    broker.Name,
+		BrokerStatus:  broker.Status,
+		LastHeartbeat: broker.LastHeartbeat,
+		HubEndpoint:   GetHubEndpoint(settings),
+		HubConnected:  true, // We just connected successfully
+	}
+
+	// Get groves this broker provides for
+	grovesResp, err := client.RuntimeBrokers().ListGroves(ctx, brokerID)
+	if err == nil && grovesResp != nil {
+		for _, g := range grovesResp.Groves {
+			status.Groves = append(status.Groves, brokerGroveStatus{
+				ID:   g.GroveID,
+				Name: g.GroveName,
+			})
+		}
+	}
+
+	// Output
+	if brokerStatusJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(status)
+	}
+
+	// Text output
+	fmt.Printf("Runtime Broker Status (Remote: %s)\n", brokerID)
+	fmt.Println("======================================")
+	fmt.Println()
+
+	// Registration status
+	fmt.Println("Broker Info")
+	fmt.Println("-----------")
+	fmt.Printf("  Broker ID:   %s\n", status.BrokerID)
+	if status.BrokerName != "" {
+		fmt.Printf("  Name:        %s\n", status.BrokerName)
+	}
+	fmt.Printf("  Status:      %s\n", status.BrokerStatus)
+	if !status.LastHeartbeat.IsZero() {
+		fmt.Printf("  Last seen:   %s\n", formatRelativeTime(status.LastHeartbeat))
+	}
+	fmt.Printf("  Hub:         %s\n", status.HubEndpoint)
+	fmt.Println()
+
+	// Groves
+	if len(status.Groves) > 0 {
+		fmt.Println("Groves (Provider)")
+		fmt.Println("-----------------")
+		for _, g := range status.Groves {
+			fmt.Printf("  - %s (ID: %s)\n", g.Name, g.ID)
+		}
+	} else {
+		fmt.Println("Groves (Provider)")
+		fmt.Println("-----------------")
+		fmt.Printf("  (none)\n")
 	}
 
 	return nil
