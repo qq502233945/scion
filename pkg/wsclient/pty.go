@@ -234,25 +234,49 @@ func (c *PTYClient) handleResize() {
 
 // readFromStdin reads from stdin and sends to WebSocket.
 func (c *PTYClient) readFromStdin() error {
-	buf := make([]byte, 4096)
+	// Use a channel to receive stdin data from a dedicated reader goroutine.
+	// This allows us to respect context cancellation even though os.Stdin.Read
+	// is a blocking syscall that doesn't support deadlines.
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	readCh := make(chan readResult)
+
+	// Start a dedicated reader goroutine
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if err != nil {
+				readCh <- readResult{nil, err}
+				return
+			}
+			if n > 0 {
+				// Copy the data to avoid race conditions
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				readCh <- readResult{data, nil}
+			}
+		}
+	}()
 
 	for {
 		select {
 		case <-c.ctx.Done():
+			// Context cancelled - return immediately.
+			// The reader goroutine will eventually exit when stdin is closed
+			// or when the process exits.
 			return c.ctx.Err()
-		default:
-		}
-
-		n, err := os.Stdin.Read(buf)
-		if err != nil {
-			if err == io.EOF {
-				return nil
+		case result := <-readCh:
+			if result.err != nil {
+				if result.err == io.EOF {
+					return nil
+				}
+				return result.err
 			}
-			return err
-		}
 
-		if n > 0 {
-			msg := wsprotocol.NewPTYDataMessage(buf[:n])
+			msg := wsprotocol.NewPTYDataMessage(result.data)
 			if err := c.writeToWebSocket(msg); err != nil {
 				return err
 			}
