@@ -349,6 +349,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		Task:          task,
 		Branch:        branch,
 		Resume:        resume,
+		Start:         true, // Signal Hub to dispatch to broker immediately
 	}
 
 	// Build config if we have image override or debug mode

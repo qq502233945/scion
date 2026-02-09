@@ -137,6 +137,7 @@ type CreateAgentRequest struct {
 	Workspace     string            `json:"workspace,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 	Config        *AgentConfigOverride `json:"config,omitempty"`
+	Start         bool              `json:"start,omitempty"` // If true, dispatch to broker to start immediately
 }
 
 type AgentConfigOverride struct {
@@ -297,11 +298,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If a dispatcher is available (co-located runtime broker) and a task was provided,
+	// If a dispatcher is available (co-located runtime broker) and Start is requested,
 	// dispatch the agent to start it immediately.
-	// Without a task, this is a "create only" operation (e.g., scion create).
+	// Without Start, this is a "create only" operation (e.g., scion create).
 	var warnings []string
-	if req.Task != "" {
+	if req.Start {
 		if dispatcher := s.GetDispatcher(); dispatcher != nil {
 			if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
 				// Log the error but don't fail the request - agent is created in Hub
@@ -1457,11 +1458,11 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		return
 	}
 
-	// If a dispatcher is available (co-located runtime broker) and a task was provided,
+	// If a dispatcher is available (co-located runtime broker) and Start is requested,
 	// dispatch the agent to start it immediately.
-	// Without a task, this is a "create only" operation (e.g., scion create).
+	// Without Start, this is a "create only" operation (e.g., scion create).
 	var warnings []string
-	if req.Task != "" {
+	if req.Start {
 		if dispatcher := s.GetDispatcher(); dispatcher != nil {
 			if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
 				// Log the error but don't fail the request - agent is created in Hub

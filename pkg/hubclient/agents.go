@@ -92,6 +92,7 @@ type CreateAgentRequest struct {
 	Annotations   map[string]string `json:"annotations,omitempty"`
 	Config        *AgentConfig      `json:"config,omitempty"`
 	Resume        bool              `json:"resume,omitempty"`
+	Start         bool              `json:"start,omitempty"` // If true, dispatch to broker to start immediately
 }
 
 // CreateAgentResponse is the response from creating an agent.
