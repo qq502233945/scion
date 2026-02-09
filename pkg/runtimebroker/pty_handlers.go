@@ -198,9 +198,9 @@ func (s *LocalPTYSession) startDockerExec() error {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	// Build docker exec command
+	// Build docker exec command with PTY allocation
 	args := []string{
-		"exec", "-i",
+		"exec", "-it",
 		"--user", "scion",
 		s.containerID,
 		"tmux", "attach-session", "-t", "scion",
@@ -392,7 +392,7 @@ func (h *StreamPTYHandler) startDockerExec() error {
 	}
 
 	args := []string{
-		"exec", "-i",
+		"exec", "-it",
 		"--user", "scion",
 		h.containerID,
 		"tmux", "attach-session", "-t", "scion",
