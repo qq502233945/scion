@@ -170,6 +170,17 @@ func deleteAgentsViaHub(hubCtx *HubContext, agentNames []string) error {
 		}
 		cancel()
 
+		// Also clean up local agent files (worktree, agent directory).
+		// The Hub dispatches container cleanup to the runtime broker, but local
+		// filesystem artifacts must be removed by the CLI to avoid orphaned agents.
+		branchDeleted, err := agent.DeleteAgentFiles(agentName, grovePath, !preserveBranch)
+		if err != nil {
+			fmt.Printf("Warning: Hub record deleted but local cleanup failed for '%s': %v\n", agentName, err)
+		}
+		if branchDeleted {
+			fmt.Printf("Git branch associated with agent '%s' deleted.\n", agentName)
+		}
+
 		fmt.Printf("Agent '%s' deleted via Hub.\n", agentName)
 	}
 
