@@ -48,7 +48,31 @@ func (h *StatusHandler) Handle(event *hooks.Event) error {
 		return nil // Event doesn't trigger a state change
 	}
 
-	return h.UpdateStatus(state, false)
+	// Update operational status
+	if err := h.UpdateStatus(state, false); err != nil {
+		return err
+	}
+
+	// Claude-specific: ExitPlanMode asks user to approve plan
+	if event.Dialect == "claude" && event.Name == hooks.EventToolStart && event.Data.ToolName == "ExitPlanMode" {
+		return h.UpdateStatus(hooks.StateWaitingForInput, true)
+	}
+
+	// Claude-specific: AskUserQuestion maintains WAITING_FOR_INPUT that was
+	// set by a prior "sciontool status ask_user" call (which runs in a Bash
+	// tool whose PostToolUse could otherwise clear it).
+	if event.Dialect == "claude" && event.Name == hooks.EventToolStart && event.Data.ToolName == "AskUserQuestion" {
+		return h.UpdateStatus(hooks.StateWaitingForInput, true)
+	}
+
+	// Clear WAITING_FOR_INPUT sessionStatus when agent activity is detected.
+	// Hook events from the agent generally indicate the user has responded
+	// (e.g., confirmed a tool permission prompt).
+	if isAgentActivityEvent(event.Name) {
+		return h.ClearWaitingStatus()
+	}
+
+	return nil
 }
 
 // UpdateStatus writes the status to the agent-info.json file atomically.
@@ -69,7 +93,12 @@ func (h *StatusHandler) UpdateStatus(status hooks.AgentState, sessionStatus bool
 		info.Status = string(status)
 	}
 
-	// Write atomically
+	return h.writeAgentInfoLocked(info)
+}
+
+// writeAgentInfoLocked writes the AgentInfo to disk atomically.
+// Caller must hold h.mu.
+func (h *StatusHandler) writeAgentInfoLocked(info *AgentInfo) error {
 	data, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling status: %w", err)
@@ -95,6 +124,38 @@ func (h *StatusHandler) UpdateStatus(status hooks.AgentState, sessionStatus bool
 	}
 
 	return nil
+}
+
+// ClearWaitingStatus clears the sessionStatus if it is currently WAITING_FOR_INPUT.
+// This is a no-op if sessionStatus is any other value (e.g., COMPLETED).
+func (h *StatusHandler) ClearWaitingStatus() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	info := &AgentInfo{}
+	if data, err := os.ReadFile(h.StatusPath); err == nil {
+		_ = json.Unmarshal(data, info)
+	}
+
+	if info.SessionStatus != string(hooks.StateWaitingForInput) {
+		return nil // Not waiting, nothing to clear
+	}
+
+	info.SessionStatus = ""
+	return h.writeAgentInfoLocked(info)
+}
+
+// isAgentActivityEvent returns true for events that indicate the agent is
+// actively working, which means any prior WAITING_FOR_INPUT has been resolved.
+// Tool-end events are excluded because they fire immediately after tool execution
+// and may follow a "sciontool status ask_user" Bash call before the actual
+// question tool (AskUserQuestion) fires.
+func isAgentActivityEvent(name string) bool {
+	switch name {
+	case hooks.EventToolStart, hooks.EventPromptSubmit, hooks.EventAgentStart:
+		return true
+	}
+	return false
 }
 
 // eventToState maps normalized events to agent states.

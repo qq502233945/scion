@@ -56,6 +56,17 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 		err = h.client.ReportBusy(ctx, message)
 
 	case hooks.EventToolStart:
+		// Claude-specific: ExitPlanMode and AskUserQuestion mean waiting for user
+		if event.Dialect == "claude" && (event.Data.ToolName == "ExitPlanMode" || event.Data.ToolName == "AskUserQuestion") {
+			message := "Waiting for input"
+			if event.Data.ToolName == "ExitPlanMode" {
+				message = "Waiting for plan approval"
+			}
+			log.Debug("Hub: Reporting idle (waiting: %s)", event.Data.ToolName)
+			err = h.client.ReportIdle(ctx, message)
+			break
+		}
+
 		// Agent is executing a tool
 		message := "Executing tool"
 		if event.Data.ToolName != "" {
