@@ -17,6 +17,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -271,6 +273,23 @@ func deleteAgentLocal(agentName string) error {
 	}
 
 	if !containerFound {
+		// Check if agent definition exists on the filesystem
+		agentDirExists := false
+		if projectDir, err := config.GetResolvedProjectDir(grovePath); err == nil {
+			if _, err := os.Stat(filepath.Join(projectDir, "agents", agentName)); err == nil {
+				agentDirExists = true
+			}
+		}
+		if !agentDirExists {
+			if globalDir, err := config.GetGlobalAgentsDir(); err == nil {
+				if _, err := os.Stat(filepath.Join(globalDir, agentName)); err == nil {
+					agentDirExists = true
+				}
+			}
+		}
+		if !agentDirExists {
+			return fmt.Errorf("agent '%s' not found", agentName)
+		}
 		fmt.Println("No container found, removing agent definition...")
 	}
 

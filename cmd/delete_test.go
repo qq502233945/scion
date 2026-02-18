@@ -98,6 +98,52 @@ func newDeleteMockHubServer(t *testing.T, groveID string) (*httptest.Server, *[]
 	return server, &deletedAgents
 }
 
+func TestDeleteAgentLocal_NonExistentAgentReturnsError(t *testing.T) {
+	orig := saveDeleteTestState()
+	defer orig.restore()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	noHub = true
+
+	// Set up grove directory without any agent
+	groveDir := filepath.Join(tmpHome, "project", ".scion")
+	require.NoError(t, os.MkdirAll(filepath.Join(groveDir, "agents"), 0755))
+	grovePath = groveDir
+
+	err := deleteAgentLocal("does-not-exist")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestDeleteAgentLocal_ExistingAgentSucceeds(t *testing.T) {
+	orig := saveDeleteTestState()
+	defer orig.restore()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	noHub = true
+	preserveBranch = true
+
+	// Set up grove directory with an agent
+	groveDir := filepath.Join(tmpHome, "project", ".scion")
+	require.NoError(t, os.MkdirAll(filepath.Join(groveDir, "agents"), 0755))
+	grovePath = groveDir
+
+	agentDir := createAgentDir(t, groveDir, "real-agent")
+
+	// Verify agent dir exists
+	_, err := os.Stat(agentDir)
+	require.NoError(t, err)
+
+	err = deleteAgentLocal("real-agent")
+	require.NoError(t, err)
+
+	// Agent directory should be cleaned up
+	_, err = os.Stat(agentDir)
+	assert.True(t, os.IsNotExist(err), "agent directory should be deleted")
+}
+
 func TestDeleteAgentsViaHub_CleansUpLocalFiles(t *testing.T) {
 	orig := saveDeleteTestState()
 	defer orig.restore()
