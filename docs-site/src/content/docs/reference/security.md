@@ -71,7 +71,7 @@ Scion supports restricting authentication to specific email domains via the `SCI
 
 ### 3.2 Permissions System (Future Plans)
 
-A comprehensive, hierarchical RBAC (Role-Based Access Control) system is currently in the design phase.
+A comprehensive, hierarchical RBAC (Role-Based Access Control) system is currently in the design phase. For a detailed technical specification of the policy language and agent identity claims, see the [Policy & Permissions Reference](/reference/permissions-policy).
 
 - **Principal-Based**: Permissions are granted to **Users** and **Groups**.
 - **Hierarchical Groups**: Groups can contain other groups, allowing for complex team structures.
