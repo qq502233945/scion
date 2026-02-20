@@ -256,6 +256,182 @@ func TestHubHandler_ReportMethods(t *testing.T) {
 	})
 }
 
+// TestHubHandler_StickyStatus tests that the Hub handler respects sticky statuses.
+// When the local status (written by StatusHandler) is WAITING_FOR_INPUT or COMPLETED,
+// non-new-work events should not overwrite it on the Hub.
+func TestHubHandler_StickyStatus(t *testing.T) {
+	tests := []struct {
+		name           string
+		localStatus    string // status in agent-info.json
+		eventName      string
+		eventData      hooks.EventData
+		expectCall     bool
+		expectedStatus string
+	}{
+		{
+			name:        "tool-end skipped when local status is WAITING_FOR_INPUT",
+			localStatus: "WAITING_FOR_INPUT",
+			eventName:   hooks.EventToolEnd,
+			expectCall:  false,
+		},
+		{
+			name:        "tool-end skipped when local status is COMPLETED",
+			localStatus: "COMPLETED",
+			eventName:   hooks.EventToolEnd,
+			expectCall:  false,
+		},
+		{
+			name:           "tool-end sends idle when local status is IDLE",
+			localStatus:    "IDLE",
+			eventName:      hooks.EventToolEnd,
+			expectCall:     true,
+			expectedStatus: "idle",
+		},
+		{
+			name:        "agent-end skipped when local status is WAITING_FOR_INPUT",
+			localStatus: "WAITING_FOR_INPUT",
+			eventName:   hooks.EventAgentEnd,
+			expectCall:  false,
+		},
+		{
+			name:        "model-end skipped when local status is COMPLETED",
+			localStatus: "COMPLETED",
+			eventName:   hooks.EventModelEnd,
+			expectCall:  false,
+		},
+		{
+			name:        "model-start skipped when local status is WAITING_FOR_INPUT",
+			localStatus: "WAITING_FOR_INPUT",
+			eventName:   hooks.EventModelStart,
+			expectCall:  false,
+		},
+		{
+			name:        "model-start skipped when local status is COMPLETED",
+			localStatus: "COMPLETED",
+			eventName:   hooks.EventModelStart,
+			expectCall:  false,
+		},
+		{
+			name:           "model-start sends busy when local status is IDLE",
+			localStatus:    "IDLE",
+			eventName:      hooks.EventModelStart,
+			expectCall:     true,
+			expectedStatus: "busy",
+		},
+		{
+			name:        "tool-start skipped when local status is COMPLETED",
+			localStatus: "COMPLETED",
+			eventName:   hooks.EventToolStart,
+			eventData:   hooks.EventData{ToolName: "Bash"},
+			expectCall:  false,
+		},
+		{
+			name:           "tool-start sends busy when local status is IDLE",
+			localStatus:    "IDLE",
+			eventName:      hooks.EventToolStart,
+			eventData:      hooks.EventData{ToolName: "Bash"},
+			expectCall:     true,
+			expectedStatus: "busy",
+		},
+		{
+			name:           "prompt-submit always sends busy (clears sticky WAITING_FOR_INPUT)",
+			localStatus:    "WAITING_FOR_INPUT",
+			eventName:      hooks.EventPromptSubmit,
+			expectCall:     true,
+			expectedStatus: "busy",
+		},
+		{
+			name:           "agent-start always sends busy (clears sticky COMPLETED)",
+			localStatus:    "COMPLETED",
+			eventName:      hooks.EventAgentStart,
+			expectCall:     true,
+			expectedStatus: "busy",
+		},
+		{
+			name:           "session-start always sends running (clears sticky)",
+			localStatus:    "WAITING_FOR_INPUT",
+			eventName:      hooks.EventSessionStart,
+			expectCall:     true,
+			expectedStatus: "running",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set up a temp dir with agent-info.json containing the local status
+			tmpDir := t.TempDir()
+			info := map[string]interface{}{"status": tt.localStatus}
+			data, _ := json.Marshal(info)
+			os.WriteFile(tmpDir+"/agent-info.json", data, 0644)
+
+			// Point HOME to the temp dir so readLocalStatus finds our file
+			origHome := os.Getenv("HOME")
+			os.Setenv("HOME", tmpDir)
+			defer os.Setenv("HOME", origHome)
+
+			var mu sync.Mutex
+			callCount := 0
+			var receivedStatus string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				callCount++
+
+				var payload map[string]interface{}
+				json.NewDecoder(r.Body).Decode(&payload)
+				if s, ok := payload["status"].(string); ok {
+					receivedStatus = s
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			os.Setenv("SCION_HUB_ENDPOINT", server.URL)
+			os.Setenv("SCION_SERVER_AUTH_DEV_TOKEN", "test-token")
+			os.Setenv("SCION_AGENT_ID", "test-agent-id")
+			defer func() {
+				os.Unsetenv("SCION_HUB_ENDPOINT")
+				os.Unsetenv("SCION_HUB_URL")
+				os.Unsetenv("SCION_SERVER_AUTH_DEV_TOKEN")
+				os.Unsetenv("SCION_AGENT_ID")
+			}()
+
+			handler := NewHubHandler()
+			if handler == nil {
+				t.Fatal("Expected handler to be created")
+			}
+
+			err := handler.Handle(&hooks.Event{
+				Name: tt.eventName,
+				Data: tt.eventData,
+			})
+			if err != nil {
+				t.Errorf("Handle returned error: %v", err)
+			}
+
+			mu.Lock()
+			gotCalls := callCount
+			gotStatus := receivedStatus
+			mu.Unlock()
+
+			if tt.expectCall {
+				if gotCalls != 1 {
+					t.Errorf("Expected 1 call, got %d", gotCalls)
+				}
+				if gotStatus != tt.expectedStatus {
+					t.Errorf("Expected status %q, got %q", tt.expectedStatus, gotStatus)
+				}
+			} else {
+				if gotCalls != 0 {
+					t.Errorf("Expected no calls, got %d", gotCalls)
+				}
+			}
+		})
+	}
+}
+
 // TestTruncateMessage tests the truncation helper function.
 func TestTruncateMessage(t *testing.T) {
 	tests := []struct {

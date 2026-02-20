@@ -6,6 +6,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/sciontool/hooks"
@@ -31,6 +34,8 @@ func NewHubHandler() *HubHandler {
 }
 
 // Handle processes an event and sends a status update to the Hub.
+// It mirrors the sticky status logic from StatusHandler: when the local status
+// is WAITING_FOR_INPUT or COMPLETED, non-new-work events won't overwrite it.
 func (h *HubHandler) Handle(event *hooks.Event) error {
 	if h == nil || h.client == nil {
 		return nil
@@ -42,12 +47,26 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 	var err error
 	switch event.Name {
 	case hooks.EventSessionStart:
-		// Session starting - report running
+		// Session starting - report running (clears any sticky status)
 		log.Debug("Hub: Reporting running (session start)")
 		err = h.client.ReportRunning(ctx, "Session started")
 
-	case hooks.EventPromptSubmit, hooks.EventAgentStart, hooks.EventModelStart:
-		// Agent is thinking/working
+	case hooks.EventPromptSubmit, hooks.EventAgentStart:
+		// New work events - always clear sticky status
+		message := "Processing"
+		if event.Data.Prompt != "" {
+			message = truncateMessage(event.Data.Prompt, 100)
+		}
+		log.Debug("Hub: Reporting busy (thinking)")
+		err = h.client.ReportBusy(ctx, message)
+
+	case hooks.EventModelStart:
+		// Model start - report busy, but respect sticky status
+		// (model-start can fire during wrap-up after task completion)
+		if h.isLocalStatusSticky() {
+			log.Debug("Hub: Skipping busy (local status is sticky)")
+			return nil
+		}
 		message := "Processing"
 		if event.Data.Prompt != "" {
 			message = truncateMessage(event.Data.Prompt, 100)
@@ -70,6 +89,14 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 			break
 		}
 
+		// Tool-start clears WAITING_FOR_INPUT (user has responded) but
+		// preserves COMPLETED (tools may fire after task_completed as wrap-up).
+		localStatus := readLocalStatus()
+		if localStatus == string(hooks.StateCompleted) {
+			log.Debug("Hub: Skipping busy (completed is sticky, post-completion tool)")
+			return nil
+		}
+
 		// Agent is executing a tool
 		message := "Executing tool"
 		if event.Data.ToolName != "" {
@@ -79,7 +106,11 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 		err = h.client.ReportBusy(ctx, message)
 
 	case hooks.EventToolEnd, hooks.EventAgentEnd, hooks.EventModelEnd:
-		// Agent finished a step - report idle
+		// Check if local status is sticky before sending idle
+		if h.isLocalStatusSticky() {
+			log.Debug("Hub: Skipping idle (local status is sticky)")
+			return nil
+		}
 		log.Debug("Hub: Reporting idle (step completed)")
 		err = h.client.ReportIdle(ctx, "Ready")
 
@@ -116,6 +147,36 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 	}
 
 	return nil
+}
+
+// isLocalStatusSticky reads the local agent-info.json (written by StatusHandler
+// which runs before HubHandler) and returns true if the status is sticky
+// (WAITING_FOR_INPUT or COMPLETED).
+func (h *HubHandler) isLocalStatusSticky() bool {
+	status := readLocalStatus()
+	return isStickyStatus(status)
+}
+
+// readLocalStatus reads the current status from the local agent-info.json file.
+func readLocalStatus() string {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/home/scion"
+	}
+	statusPath := filepath.Join(home, "agent-info.json")
+
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		return ""
+	}
+
+	var info map[string]interface{}
+	if err := json.Unmarshal(data, &info); err != nil {
+		return ""
+	}
+
+	status, _ := info["status"].(string)
+	return status
 }
 
 // ReportWaitingForInput sends a waiting-for-input status to the Hub.

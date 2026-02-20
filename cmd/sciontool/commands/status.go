@@ -81,11 +81,14 @@ func runStatusAskUser(message string) {
 		log.Error("Failed to log event: %v", err)
 	}
 
-	// Report to Hub if in hosted mode
+	// Report to Hub if configured
 	if hubClient := hub.NewClient(); hubClient != nil && hubClient.IsConfigured() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := hubClient.ReportIdle(ctx, message); err != nil {
+		if err := hubClient.UpdateStatus(ctx, hub.StatusUpdate{
+			Status:  hub.StatusWaitingForInput,
+			Message: message,
+		}); err != nil {
 			log.Error("Failed to report to Hub: %v", err)
 		}
 	}
