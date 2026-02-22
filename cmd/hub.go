@@ -460,7 +460,7 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 			"endpoint":      endpoint,
 			"configured":    settings.IsHubConfigured(),
 			"groveId":       settings.GroveID,
-			"scionVersion":  version.Short(),
+			"scionVersionLocal": version.Short(),
 		}
 		if settings.Hub != nil {
 			status["brokerId"] = settings.Hub.BrokerID
@@ -473,19 +473,8 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 		status["authMethod"] = authInfo.MethodType
 		status["authSource"] = authInfo.Source
 		status["isDevAuth"] = authInfo.IsDevAuth
-		if authInfo.OAuthCreds != nil && authInfo.OAuthCreds.User != nil {
-			status["authUser"] = map[string]string{
-				"id":          authInfo.OAuthCreds.User.ID,
-				"email":       authInfo.OAuthCreds.User.Email,
-				"displayName": authInfo.OAuthCreds.User.DisplayName,
-				"role":        authInfo.OAuthCreds.User.Role,
-			}
-			if !authInfo.OAuthCreds.ExpiresAt.IsZero() {
-				status["authExpires"] = authInfo.OAuthCreds.ExpiresAt.Format(time.RFC3339)
-			}
-		}
 
-		// Try to connect and get health
+		// Try to connect and get health, then verify auth
 		if endpoint != "" && !noHub {
 			client, err := getHubClient(settings)
 			if err == nil {
@@ -495,6 +484,29 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 					status["connected"] = true
 					status["hubVersion"] = health.Version
 					status["hubStatus"] = health.Status
+					status["scionVersionServer"] = health.ScionVersion
+
+					// Verify auth against server
+					if authInfo.MethodType != "none" {
+						meCtx, meCancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer meCancel()
+						if meUser, meErr := client.Auth().Me(meCtx); meErr == nil {
+							status["authVerified"] = true
+							status["authUser"] = map[string]string{
+								"id":          meUser.ID,
+								"email":       meUser.Email,
+								"displayName": meUser.DisplayName,
+								"role":        meUser.Role,
+							}
+						} else {
+							status["authVerified"] = false
+						}
+					}
+
+					// Add OAuth expiration if applicable
+					if authInfo.HasOAuth && authInfo.OAuthCreds != nil && !authInfo.OAuthCreds.ExpiresAt.IsZero() {
+						status["authExpires"] = authInfo.OAuthCreds.ExpiresAt.Format(time.RFC3339)
+					}
 
 					// Add grove context to JSON output
 					groveContext := getGroveContextJSON(client, resolvedPath, isGlobal, settings)
@@ -525,25 +537,50 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Broker ID:  %s\n", valueOrNone(settings.Hub.BrokerID))
 	}
 
+	// Create hub client early so we can use it for auth verification and health checks
+	var client hubclient.Client
+	var health *hubclient.HealthResponse
+	var clientErr error
+
+	if endpoint != "" && !noHub {
+		client, clientErr = getHubClient(settings)
+		if clientErr == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			health, _ = client.Health(ctx)
+		}
+	}
+
 	// Authentication status section
 	fmt.Println()
 	fmt.Println("Authentication")
 	fmt.Println("--------------")
 	if authInfo.MethodType == "none" {
-		fmt.Println("Method:     Not authenticated")
-	} else {
-		fmt.Printf("Method:     %s\n", authInfo.Method)
-		if authInfo.IsDevAuth {
-			fmt.Println("            (development mode - not for production use)")
-		}
-		if authInfo.HasOAuth && authInfo.OAuthCreds != nil {
-			if authInfo.OAuthCreds.User != nil {
-				fmt.Printf("User:       %s (%s)\n", authInfo.OAuthCreds.User.DisplayName, authInfo.OAuthCreds.User.Email)
-				if authInfo.OAuthCreds.User.Role != "" {
-					fmt.Printf("Role:       %s\n", authInfo.OAuthCreds.User.Role)
+		fmt.Println("Status:     Not authenticated")
+		fmt.Println("            Run 'scion hub auth login' to authenticate.")
+	} else if client != nil {
+		// Verify auth against the server by calling an authenticated endpoint
+		meCtx, meCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer meCancel()
+		meUser, meErr := client.Auth().Me(meCtx)
+		if meErr != nil {
+			fmt.Println("Status:     Not authenticated")
+			fmt.Printf("Method:     %s (configured but not accepted by server)\n", authInfo.Method)
+			fmt.Println("            Run 'scion hub auth login' to authenticate.")
+		} else {
+			fmt.Printf("Method:     %s\n", authInfo.Method)
+			if authInfo.IsDevAuth {
+				fmt.Println("            (development mode - not for production use)")
+			}
+			if meUser != nil {
+				if meUser.DisplayName != "" || meUser.Email != "" {
+					fmt.Printf("User:       %s (%s)\n", meUser.DisplayName, meUser.Email)
+				}
+				if meUser.Role != "" {
+					fmt.Printf("Role:       %s\n", meUser.Role)
 				}
 			}
-			if !authInfo.OAuthCreds.ExpiresAt.IsZero() {
+			if authInfo.HasOAuth && authInfo.OAuthCreds != nil && !authInfo.OAuthCreds.ExpiresAt.IsZero() {
 				if time.Now().After(authInfo.OAuthCreds.ExpiresAt) {
 					fmt.Printf("Expires:    %s (EXPIRED)\n", authInfo.OAuthCreds.ExpiresAt.Format(time.RFC3339))
 				} else {
@@ -551,43 +588,32 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	} else {
+		// Can't reach server to verify - show local auth info only
+		fmt.Printf("Method:     %s (not verified - server unreachable)\n", authInfo.Method)
+		if authInfo.IsDevAuth {
+			fmt.Println("            (development mode - not for production use)")
+		}
 	}
 
-	// Try to connect
+	// Hub Server section
 	if endpoint != "" && !noHub {
-		client, err := getHubClient(settings)
-		if err != nil {
-			fmt.Printf("\nConnection: failed (%s)\n", err)
+		if clientErr != nil {
+			fmt.Printf("\nConnection: failed (%s)\n", clientErr)
 			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		health, err := client.Health(ctx)
-		if err != nil {
-			fmt.Println()
-			fmt.Println("Hub Server")
-			fmt.Println("----------")
-			fmt.Printf("Connection: failed (%s)\n", err)
+		fmt.Println()
+		fmt.Println("Hub Server")
+		fmt.Println("----------")
+		if health == nil {
+			fmt.Printf("Connection: failed\n")
 		} else {
-			fmt.Println()
-			fmt.Println("Hub Server")
-			fmt.Println("----------")
 			fmt.Printf("Connection: ok\n")
 			fmt.Printf("Hub Version: %s\n", health.Version)
 			fmt.Printf("Hub Status:  %s\n", health.Status)
-			fmt.Printf("Scion Version: %s\n", version.Short())
-
-			// If OAuth, verify auth is actually working by calling /auth/me
-			if authInfo.HasOAuth {
-				meCtx, meCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer meCancel()
-				if _, err := client.Auth().Me(meCtx); err != nil {
-					fmt.Printf("\nAuth verification: failed (%s)\n", err)
-					fmt.Println("Run 'scion hub auth login' to re-authenticate.")
-				}
-			}
+			fmt.Printf("Scion Version (Server): %s\n", valueOrNone(health.ScionVersion))
+			fmt.Printf("Scion Version (Local):  %s\n", version.Short())
 
 			// Show grove context if we're in a grove
 			printGroveContext(client, resolvedPath, isGlobal, settings)

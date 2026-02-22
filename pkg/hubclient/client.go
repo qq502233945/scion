@@ -171,10 +171,11 @@ func (c *client) Health(ctx context.Context) (*HealthResponse, error) {
 
 // HealthResponse is the response from health check.
 type HealthResponse struct {
-	Status  string            `json:"status"`
-	Version string            `json:"version"`
-	Uptime  string            `json:"uptime"`
-	Checks  map[string]string `json:"checks,omitempty"`
+	Status       string            `json:"status"`
+	Version      string            `json:"version"`
+	ScionVersion string            `json:"scionVersion"`
+	Uptime       string            `json:"uptime"`
+	Checks       map[string]string `json:"checks,omitempty"`
 }
 
 // Option configures a Hub client.

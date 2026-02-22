@@ -125,6 +125,11 @@ func TestHealthz(t *testing.T) {
 	if resp.Status != "healthy" {
 		t.Errorf("expected status 'healthy', got %q", resp.Status)
 	}
+
+	// ScionVersion should be populated (may be "unknown" in test builds)
+	if resp.ScionVersion == "" {
+		t.Error("expected scionVersion to be non-empty")
+	}
 }
 
 func TestReadyz(t *testing.T) {

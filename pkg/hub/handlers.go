@@ -30,6 +30,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/transfer"
 	"github.com/ptone/scion-agent/pkg/util"
+	"github.com/ptone/scion-agent/pkg/version"
 )
 
 // ============================================================================
@@ -37,11 +38,12 @@ import (
 // ============================================================================
 
 type HealthResponse struct {
-	Status  string            `json:"status"`
-	Version string            `json:"version"`
-	Uptime  string            `json:"uptime"`
-	Checks  map[string]string `json:"checks,omitempty"`
-	Stats   *HealthStats      `json:"stats,omitempty"`
+	Status       string            `json:"status"`
+	Version      string            `json:"version"`
+	ScionVersion string            `json:"scionVersion"`
+	Uptime       string            `json:"uptime"`
+	Checks       map[string]string `json:"checks,omitempty"`
+	Stats        *HealthStats      `json:"stats,omitempty"`
 }
 
 type HealthStats struct {
@@ -86,11 +88,12 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := HealthResponse{
-		Status:  status,
-		Version: "0.1.0", // TODO: Get from build info
-		Uptime:  time.Since(s.startTime).Round(time.Second).String(),
-		Checks:  checks,
-		Stats:   stats,
+		Status:       status,
+		Version:      "0.1.0", // TODO: Get from build info
+		ScionVersion: version.Short(),
+		Uptime:       time.Since(s.startTime).Round(time.Second).String(),
+		Checks:       checks,
+		Stats:        stats,
 	}
 
 	writeJSON(w, http.StatusOK, resp)
