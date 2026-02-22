@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/apiclient"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/credentials"
@@ -563,6 +564,17 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 			GroveID: hubCtx.GroveID,
 		}
 
+		// Read local agent info to populate template and harness
+		localInfo := getLocalAgentInfo(hubCtx.GrovePath, name)
+		if localInfo != nil {
+			if localInfo.Template != "" {
+				req.Template = localInfo.Template
+			}
+			if localInfo.HarnessConfig != "" {
+				req.Harness = localInfo.HarnessConfig
+			}
+		}
+
 		for {
 			resp, err := hubCtx.Client.GroveAgents(hubCtx.GroveID).Create(ctxTimeout, req)
 			if err == nil {
@@ -704,6 +716,54 @@ func GetLocalAgents(grovePath string) ([]string, error) {
 	}
 
 	return agents, nil
+}
+
+// getLocalAgentInfo reads local agent config files to extract template and harness info.
+// Returns nil if the info cannot be read.
+func getLocalAgentInfo(grovePath, agentName string) *api.AgentInfo {
+	agentDir := filepath.Join(grovePath, "agents", agentName)
+
+	// Try agent-info.json first (written by the container at runtime)
+	agentInfoPath := filepath.Join(agentDir, "home", "agent-info.json")
+	if data, err := os.ReadFile(agentInfoPath); err == nil {
+		var info api.AgentInfo
+		if err := json.Unmarshal(data, &info); err == nil {
+			return &info
+		}
+	}
+
+	// Fallback to scion-agent.json (legacy)
+	scionJSONPath := filepath.Join(agentDir, "scion-agent.json")
+	if data, err := os.ReadFile(scionJSONPath); err == nil {
+		var cfg api.ScionConfig
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			// Build a minimal AgentInfo from ScionConfig
+			info := &api.AgentInfo{
+				HarnessConfig: cfg.HarnessConfig,
+			}
+			if info.HarnessConfig == "" {
+				info.HarnessConfig = cfg.Harness
+			}
+			return info
+		}
+	}
+
+	// Fallback to scion-agent.yaml
+	scionYAMLPath := filepath.Join(agentDir, "scion-agent.yaml")
+	if data, err := os.ReadFile(scionYAMLPath); err == nil {
+		var cfg api.ScionConfig
+		if err := yaml.Unmarshal(data, &cfg); err == nil {
+			info := &api.AgentInfo{
+				HarnessConfig: cfg.HarnessConfig,
+			}
+			if info.HarnessConfig == "" {
+				info.HarnessConfig = cfg.Harness
+			}
+			return info
+		}
+	}
+
+	return nil
 }
 
 // isGroveRegistered checks if the grove is registered with the Hub.

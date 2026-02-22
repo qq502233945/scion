@@ -1024,3 +1024,97 @@ func TestRFC3339Nano_BackwardCompatible(t *testing.T) {
 		})
 	}
 }
+
+func TestGetLocalAgentInfo_FromAgentInfoJSON(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hubsync-agentinfo-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create agent directory with agent-info.json
+	homeDir := filepath.Join(tmpDir, "agents", "myagent", "home")
+	if err := os.MkdirAll(homeDir, 0755); err != nil {
+		t.Fatalf("Failed to create home dir: %v", err)
+	}
+	info := `{"name":"myagent","template":"default","harnessConfig":"gemini"}`
+	if err := os.WriteFile(filepath.Join(homeDir, "agent-info.json"), []byte(info), 0644); err != nil {
+		t.Fatalf("Failed to write agent-info.json: %v", err)
+	}
+
+	result := getLocalAgentInfo(tmpDir, "myagent")
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	if result.Template != "default" {
+		t.Errorf("Template = %q, want %q", result.Template, "default")
+	}
+	if result.HarnessConfig != "gemini" {
+		t.Errorf("HarnessConfig = %q, want %q", result.HarnessConfig, "gemini")
+	}
+}
+
+func TestGetLocalAgentInfo_FallbackToScionJSON(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hubsync-agentinfo-json-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create agent directory with only scion-agent.json (no agent-info.json)
+	agentDir := filepath.Join(tmpDir, "agents", "myagent")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("Failed to create agent dir: %v", err)
+	}
+	cfg := `{"harness_config":"claude"}`
+	if err := os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(cfg), 0644); err != nil {
+		t.Fatalf("Failed to write scion-agent.json: %v", err)
+	}
+
+	result := getLocalAgentInfo(tmpDir, "myagent")
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	if result.HarnessConfig != "claude" {
+		t.Errorf("HarnessConfig = %q, want %q", result.HarnessConfig, "claude")
+	}
+}
+
+func TestGetLocalAgentInfo_FallbackToScionYAML(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hubsync-agentinfo-yaml-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create agent directory with only scion-agent.yaml
+	agentDir := filepath.Join(tmpDir, "agents", "myagent")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("Failed to create agent dir: %v", err)
+	}
+	cfg := "harness: gemini\nharness_config: gemini\n"
+	if err := os.WriteFile(filepath.Join(agentDir, "scion-agent.yaml"), []byte(cfg), 0644); err != nil {
+		t.Fatalf("Failed to write scion-agent.yaml: %v", err)
+	}
+
+	result := getLocalAgentInfo(tmpDir, "myagent")
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	if result.HarnessConfig != "gemini" {
+		t.Errorf("HarnessConfig = %q, want %q", result.HarnessConfig, "gemini")
+	}
+}
+
+func TestGetLocalAgentInfo_NonexistentAgent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hubsync-agentinfo-none-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	result := getLocalAgentInfo(tmpDir, "nonexistent")
+	if result != nil {
+		t.Errorf("Expected nil result for nonexistent agent, got %+v", result)
+	}
+}

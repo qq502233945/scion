@@ -1647,3 +1647,87 @@ func TestGetAgent_HarnessConfigEnriched(t *testing.T) {
 	assert.Equal(t, "claude", got.HarnessConfig,
 		"single agent GET should include enriched harnessConfig")
 }
+
+// TestCreateAgent_HarnessFromRequestField verifies that the explicit Harness
+// field in CreateAgentRequest is used as a fallback when the template doesn't
+// resolve a harness (e.g., during sync when the template is local-only).
+func TestCreateAgent_HarnessFromRequestField(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create agent with no template but explicit harness (sync scenario)
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "sync-agent",
+		GroveID: grove.ID,
+		Harness: "gemini",
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	// Verify harness is stored in AppliedConfig
+	agent, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, agent.AppliedConfig)
+	assert.Equal(t, "gemini", agent.AppliedConfig.Harness,
+		"AppliedConfig.Harness should be set from request Harness field")
+
+	// Verify enrichment works for list
+	rec2 := doRequest(t, srv, http.MethodGet, "/api/v1/agents?groveId="+grove.ID, nil)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	var listResp ListAgentsResponse
+	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &listResp))
+
+	found := false
+	for _, a := range listResp.Agents {
+		if a.Name == "sync-agent" {
+			assert.Equal(t, "gemini", a.HarnessConfig,
+				"enriched HarnessConfig should show gemini for synced agent")
+			found = true
+		}
+	}
+	assert.True(t, found, "sync-agent should be in the list")
+}
+
+// TestCreateAgent_HarnessFieldIgnoredWhenTemplateResolved verifies that
+// when a template resolves successfully, its harness takes precedence
+// over the explicit Harness field.
+func TestCreateAgent_HarnessFieldIgnoredWhenTemplateResolved(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create a template with harness
+	tmpl := &store.Template{
+		ID:      "tmpl-with-harness",
+		Name:    "claude-template",
+		Slug:    "claude-template",
+		Harness: "claude",
+		GroveID: grove.ID,
+		Scope:   "grove",
+		ScopeID: grove.ID,
+		Status:  "active",
+	}
+	require.NoError(t, s.CreateTemplate(ctx, tmpl))
+
+	// Create agent with template that resolves AND explicit harness
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:     "tmpl-agent",
+		GroveID:  grove.ID,
+		Template: "claude-template",
+		Harness:  "gemini", // Should be ignored since template resolves
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	agent, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, agent.AppliedConfig)
+	assert.Equal(t, "claude", agent.AppliedConfig.Harness,
+		"template-resolved harness should take precedence over request Harness field")
+}

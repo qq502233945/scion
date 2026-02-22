@@ -104,6 +104,7 @@ type CreateAgentRequest struct {
 	Name          string            `json:"name"`
 	GroveID       string            `json:"groveId"`
 	Template      string            `json:"template,omitempty"`
+	Harness       string            `json:"harness,omitempty"` // Explicit harness type (used during sync when template may not be on Hub)
 	RuntimeBrokerID string            `json:"runtimeBrokerId,omitempty"`
 	Profile       string            `json:"profile,omitempty"`
 	Task          string            `json:"task,omitempty"`

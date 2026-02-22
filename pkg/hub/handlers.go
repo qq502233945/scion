@@ -152,6 +152,7 @@ type CreateAgentRequest struct {
 	GroveID       string            `json:"groveId"`
 	RuntimeBrokerID string            `json:"runtimeBrokerId,omitempty"` // Optional: uses grove's default if not specified
 	Template      string            `json:"template"`
+	Harness       string            `json:"harness,omitempty"` // Explicit harness type (used during sync when template may not be on Hub)
 	Profile       string            `json:"profile,omitempty"` // Settings profile for the runtime broker to use
 	Task          string            `json:"task,omitempty"`
 	Branch        string            `json:"branch,omitempty"`
@@ -429,6 +430,13 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create agent
+
+	// Resolve harness: prefer template metadata, then explicit request field, then template name
+	harness := s.getHarnessFromTemplate(resolvedTemplate, req.Template)
+	if harness == "" && req.Harness != "" {
+		harness = req.Harness
+	}
+
 	agent := &store.Agent{
 		ID:              api.NewUUID(),
 		Slug:            slug,
@@ -454,7 +462,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			Env:         req.Config.Env,
 			Model:       req.Config.Model,
 			Profile:     req.Profile,
-			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
+			Harness:     harness,
 			Task:        req.Task,
 			Attach:      req.Attach,
 			Workspace:   req.Workspace,
@@ -465,7 +473,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		// Store task even when no config override is provided
 		agent.AppliedConfig = &store.AgentAppliedConfig{
 			Profile:     req.Profile,
-			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
+			Harness:     harness,
 			Task:        req.Task,
 			Attach:      req.Attach,
 			Workspace:   req.Workspace,
@@ -2015,6 +2023,13 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 	}
 
 	// Create agent
+
+	// Resolve harness: prefer template metadata, then explicit request field, then template name
+	harness := s.getHarnessFromTemplate(resolvedTemplate, req.Template)
+	if harness == "" && req.Harness != "" {
+		harness = req.Harness
+	}
+
 	agent := &store.Agent{
 		ID:              api.NewUUID(),
 		Slug:            api.Slugify(req.Name),
@@ -2040,7 +2055,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 			Env:         req.Config.Env,
 			Model:       req.Config.Model,
 			Profile:     req.Profile,
-			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
+			Harness:     harness,
 			Task:        req.Task,
 			Attach:      req.Attach,
 			Workspace:   req.Workspace,
@@ -2051,7 +2066,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		// Store task even when no config override is provided
 		agent.AppliedConfig = &store.AgentAppliedConfig{
 			Profile:     req.Profile,
-			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
+			Harness:     harness,
 			Task:        req.Task,
 			Attach:      req.Attach,
 			Workspace:   req.Workspace,
