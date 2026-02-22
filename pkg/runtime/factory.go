@@ -128,6 +128,7 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 		} else {
 			rt.SyncMode = "tar" // Implicit default
 		}
+		rt.GKEMode = rtConfig.GKE
 		return rt
 	}
 

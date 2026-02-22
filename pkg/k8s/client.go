@@ -32,6 +32,11 @@ import (
 var (
 	SandboxGVR      = schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxes"}
 	SandboxClaimGVR = schema.GroupVersionResource{Group: "extensions.agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxclaims"}
+
+	// SecretProviderClassGVR is the GVR for the Secrets Store CSI Driver SecretProviderClass CRD.
+	SecretProviderClassGVR = schema.GroupVersionResource{
+		Group: "secrets-store.csi.x-k8s.io", Version: "v1", Resource: "secretproviderclasses",
+	}
 )
 
 type Client struct {
@@ -90,6 +95,9 @@ func NewTestClient(dyn dynamic.Interface, cs kubernetes.Interface) *Client {
 		Clientset: cs,
 	}
 }
+
+// Dynamic returns the dynamic Kubernetes client for CRD operations.
+func (c *Client) Dynamic() dynamic.Interface { return c.dynamic }
 
 func (c *Client) CreateSandboxClaim(ctx context.Context, namespace string, claim *v1alpha1.SandboxClaim) (*v1alpha1.SandboxClaim, error) {
 	unstructuredMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(claim)

@@ -391,6 +391,7 @@ type ResolvedSecret struct {
 	Target string `json:"target"`         // Projection target (env var name, json key, or file path)
 	Value  string `json:"value"`          // Decrypted secret value
 	Source string `json:"source"`         // Scope that provided this secret (user, grove, runtime_broker)
+	Ref    string `json:"ref,omitempty"`  // External reference (e.g., GCP SM resource path)
 }
 
 // GitCloneConfig specifies how to clone a git repository into the workspace.

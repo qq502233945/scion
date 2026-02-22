@@ -1000,6 +1000,7 @@ func (d *HTTPAgentDispatcher) resolveSecrets(ctx context.Context, agent *store.A
 			Target: sv.Target,
 			Value:  sv.Value,
 			Source: sv.Scope,
+			Ref:    sv.SecretRef,
 		}
 	}
 	return result, nil

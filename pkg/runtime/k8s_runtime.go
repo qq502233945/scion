@@ -45,6 +45,7 @@ type KubernetesRuntime struct {
 	Client           *k8s.Client
 	DefaultNamespace string
 	SyncMode         string
+	GKEMode          bool
 }
 
 func NewKubernetesRuntime(client *k8s.Client) *KubernetesRuntime {

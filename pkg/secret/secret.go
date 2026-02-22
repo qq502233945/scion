@@ -59,6 +59,7 @@ type SecretMeta struct {
 	Scope       string    `json:"scope"`       // user, grove, runtime_broker
 	ScopeID     string    `json:"scopeId"`     // ID of the scoped entity
 	Description string    `json:"description,omitempty"`
+	SecretRef   string    `json:"secretRef,omitempty"` // External reference (e.g., GCP SM resource path)
 	Version     int       `json:"version"`
 	Created     time.Time `json:"created"`
 	Updated     time.Time `json:"updated"`

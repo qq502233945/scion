@@ -240,6 +240,7 @@ func (b *GCPBackend) Resolve(ctx context.Context, userID, groveID, brokerID stri
 					Scope:       sc.scope,
 					ScopeID:     sc.scopeID,
 					Description: s.Description,
+					SecretRef:   fmt.Sprintf("projects/%s/secrets/%s", b.projectID, smName),
 					Version:     s.Version,
 					Created:     s.Created,
 					Updated:     s.Updated,

@@ -365,6 +365,7 @@ type V1RuntimeConfig struct {
 	Namespace string            `json:"namespace,omitempty" yaml:"namespace,omitempty" koanf:"namespace"`
 	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
 	Sync      string            `json:"sync,omitempty" yaml:"sync,omitempty" koanf:"sync"`
+	GKE       bool              `json:"gke,omitempty" yaml:"gke,omitempty" koanf:"gke"`
 }
 
 // HarnessConfigEntry defines a harness configuration entry in versioned settings.

@@ -182,6 +182,7 @@ func fromStoreSecretMeta(s *store.Secret) *SecretMeta {
 		Scope:       s.Scope,
 		ScopeID:     s.ScopeID,
 		Description: s.Description,
+		SecretRef:   s.SecretRef,
 		Version:     s.Version,
 		Created:     s.Created,
 		Updated:     s.Updated,
