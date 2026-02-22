@@ -336,12 +336,12 @@ func init() {
 
 // authInfo describes the authentication method being used
 type authInfo struct {
-	Method      string // Human-readable description
-	MethodType  string // Short type: "oauth", "bearer", "apikey", "devauth", "none"
-	Source      string // Where the credentials came from
-	IsDevAuth   bool   // Whether dev-auth is being used
-	HasOAuth    bool   // Whether OAuth credentials are present
-	OAuthCreds  *credentials.HubCredentials
+	Method     string // Human-readable description
+	MethodType string // Short type: "oauth", "bearer", "apikey", "devauth", "none"
+	Source     string // Where the credentials came from
+	IsDevAuth  bool   // Whether dev-auth is being used
+	HasOAuth   bool   // Whether OAuth credentials are present
+	OAuthCreds *credentials.HubCredentials
 }
 
 // getAuthInfo determines what authentication method will be used for a given endpoint.
@@ -455,11 +455,11 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 
 	if isJSONOutput() {
 		status := map[string]interface{}{
-			"enabled":       hubEnabled,
-			"cliOverride":   noHub,
-			"endpoint":      endpoint,
-			"configured":    settings.IsHubConfigured(),
-			"groveId":       settings.GroveID,
+			"enabled":           hubEnabled,
+			"cliOverride":       noHub,
+			"endpoint":          endpoint,
+			"configured":        settings.IsHubConfigured(),
+			"groveId":           settings.GroveID,
 			"scionVersionLocal": version.Short(),
 		}
 		if settings.Hub != nil {
@@ -1562,8 +1562,8 @@ func runHubBrokersDelete(cmd *cobra.Command, args []string) error {
 			Command: "hub brokers delete",
 			Message: fmt.Sprintf("Broker '%s' deleted successfully.", broker.Name),
 			Details: map[string]interface{}{
-				"brokerId":   broker.ID,
-				"brokerName": broker.Name,
+				"brokerId":      broker.ID,
+				"brokerName":    broker.Name,
 				"grovesRemoved": len(broker.Groves),
 			},
 		})
@@ -2019,7 +2019,8 @@ func runHubUnlink(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("Grove '%s' has been unlinked from the Hub.\n", groveName)
 	fmt.Println("The grove and its agents remain on the Hub for other brokers.")
-	fmt.Println("Use 'scion hub link' to re-link this grove.")
+	fmt.Println("Use 'scion hub link' to re-link this local grove to the hub's.")
+	fmt.Printf("Use \"scion hub groves delete '%s'\" to remove grove from hub entirely.", groveName)
 
 	return nil
 }
