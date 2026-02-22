@@ -266,6 +266,12 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	// Determine whether hub is explicitly disabled in grove settings.
+	// When disabled, we suppress hub env var injection from agent config
+	// and template env sections (but not from caller-provided opts.Env,
+	// which may come from an authoritative source like the runtime broker).
+	hubDisabled := settings != nil && settings.IsHubExplicitlyDisabled()
+
 	// Inject agent limit env vars from scion config
 	if finalScionCfg != nil {
 		if finalScionCfg.MaxTurns > 0 {
@@ -276,7 +282,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 		// Agent-level hub endpoint takes highest priority, overriding
 		// grove settings and server config values passed via opts.Env.
-		if finalScionCfg.Hub != nil && finalScionCfg.Hub.Endpoint != "" {
+		if !hubDisabled && finalScionCfg.Hub != nil && finalScionCfg.Hub.Endpoint != "" {
 			opts.Env["SCION_HUB_ENDPOINT"] = finalScionCfg.Hub.Endpoint
 			opts.Env["SCION_HUB_URL"] = finalScionCfg.Hub.Endpoint
 		}
@@ -309,13 +315,25 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	// final priority. This allows templates to specify a container-
 	// accessible endpoint (e.g. http://host.docker.internal:8080)
 	// that differs from the host-level hub endpoint.
-	if finalScionCfg != nil && finalScionCfg.Env != nil {
+	if !hubDisabled && finalScionCfg != nil && finalScionCfg.Env != nil {
 		if ep, ok := finalScionCfg.Env["SCION_HUB_ENDPOINT"]; ok && ep != "" {
 			expandedEp, _ := util.ExpandEnv(ep)
 			if expandedEp != "" {
 				opts.Env["SCION_HUB_ENDPOINT"] = expandedEp
 				opts.Env["SCION_HUB_URL"] = expandedEp
 			}
+		}
+	}
+
+	// When hub is explicitly disabled, strip hub env vars from both
+	// opts.Env and the scion config env section to prevent leakage
+	// through buildAgentEnv (which processes scionCfg.Env independently).
+	if hubDisabled {
+		delete(opts.Env, "SCION_HUB_ENDPOINT")
+		delete(opts.Env, "SCION_HUB_URL")
+		if finalScionCfg != nil && finalScionCfg.Env != nil {
+			delete(finalScionCfg.Env, "SCION_HUB_ENDPOINT")
+			delete(finalScionCfg.Env, "SCION_HUB_URL")
 		}
 	}
 

@@ -326,12 +326,14 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 	// inside Start() via hub.endpoint or env.SCION_HUB_ENDPOINT.
 	if IsHubEnabled() {
 		if cliSettings, err := config.LoadSettings(grovePath); err == nil {
-			if ep := GetHubEndpoint(cliSettings); ep != "" {
-				if opts.Env == nil {
-					opts.Env = make(map[string]string)
+			if !cliSettings.IsHubExplicitlyDisabled() {
+				if ep := GetHubEndpoint(cliSettings); ep != "" {
+					if opts.Env == nil {
+						opts.Env = make(map[string]string)
+					}
+					opts.Env["SCION_HUB_ENDPOINT"] = ep
+					opts.Env["SCION_HUB_URL"] = ep
 				}
-				opts.Env["SCION_HUB_ENDPOINT"] = ep
-				opts.Env["SCION_HUB_URL"] = ep
 			}
 		}
 	}

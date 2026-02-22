@@ -268,10 +268,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// Hub's own server config may only know its localhost address.
 	if req.GrovePath != "" {
 		if groveSettings, err := config.LoadSettings(req.GrovePath); err == nil {
-			if ep := groveSettings.GetHubEndpoint(); ep != "" {
-				hubEndpoint = ep
-				if s.config.Debug {
-					slog.Debug("Hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", req.GrovePath)
+			if !groveSettings.IsHubExplicitlyDisabled() {
+				if ep := groveSettings.GetHubEndpoint(); ep != "" {
+					hubEndpoint = ep
+					if s.config.Debug {
+						slog.Debug("Hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", req.GrovePath)
+					}
 				}
 			}
 		}

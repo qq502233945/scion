@@ -1195,6 +1195,195 @@ func TestBuildAgentEnv_EnvKeyScionHubEndpointOverride(t *testing.T) {
 	})
 }
 
+func TestStartSuppressesHubEnvWhenHubDisabled(t *testing.T) {
+	// When grove settings have hub.enabled=false, hub env vars should NOT be
+	// injected into the container, even when hub.endpoint is configured and
+	// agent-level hub config or template env section specifies an endpoint.
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	// Clear dev token env vars so we control the test
+	for _, k := range []string{"SCION_DEV_TOKEN", "SCION_SERVER_AUTH_DEV_TOKEN", "SCION_DEV_TOKEN_FILE"} {
+		if old, ok := os.LookupEnv(k); ok {
+			defer os.Setenv(k, old)
+			os.Unsetenv(k)
+		}
+	}
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+
+	// Create harness-config
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "test-harness")
+	os.MkdirAll(hcDir, 0755)
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte("harness: gemini\nuser: scion\nimage: test-image:latest\n"), 0644)
+
+	// Create a minimal template
+	tplDir := filepath.Join(globalScionDir, "templates", "default")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config": "test-harness"}`), 0644)
+
+	// Global settings
+	os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(`schema_version: "1"
+active_profile: local
+profiles:
+  local:
+    runtime: docker
+`), 0644)
+
+	// Create project grove with hub explicitly DISABLED but endpoint configured
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+	os.WriteFile(filepath.Join(projectScionDir, "settings.yaml"), []byte(`hub:
+  enabled: false
+  endpoint: "http://localhost:9810"
+`), 0644)
+
+	// Write a dev-token file (should NOT be used since hub is disabled)
+	os.WriteFile(filepath.Join(globalScionDir, "dev-token"), []byte("scion-dev-test-token-abc"), 0644)
+
+	t.Run("grove settings hub disabled suppresses hub env", func(t *testing.T) {
+		var capturedConfig runtime.RunConfig
+		mockRT := &runtime.MockRuntime{
+			ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+				return []api.AgentInfo{}, nil
+			},
+			RunFunc: func(ctx context.Context, cfg runtime.RunConfig) (string, error) {
+				capturedConfig = cfg
+				return "mock-id", nil
+			},
+		}
+
+		mgr := NewManager(mockRT)
+
+		_, err := mgr.Start(context.Background(), api.StartOptions{
+			Name:      "test-agent",
+			GrovePath: projectScionDir,
+			NoAuth:    true,
+		})
+		if err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+
+		envMap := make(map[string]string)
+		for _, e := range capturedConfig.Env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		if _, exists := envMap["SCION_HUB_ENDPOINT"]; exists {
+			t.Error("expected SCION_HUB_ENDPOINT to NOT be set when hub.enabled=false")
+		}
+		if _, exists := envMap["SCION_HUB_URL"]; exists {
+			t.Error("expected SCION_HUB_URL to NOT be set when hub.enabled=false")
+		}
+		if _, exists := envMap["SCION_SERVER_AUTH_DEV_TOKEN"]; exists {
+			t.Error("expected SCION_SERVER_AUTH_DEV_TOKEN to NOT be set when hub.enabled=false")
+		}
+	})
+
+	t.Run("agent-level hub endpoint suppressed when hub disabled", func(t *testing.T) {
+		// Agent scion-agent.json has hub.endpoint but grove says hub.enabled=false
+		agentDir := filepath.Join(projectScionDir, "agents", "hub-disabled-agent")
+		os.MkdirAll(filepath.Join(agentDir, "home"), 0755)
+		os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(`{
+			"harness": "gemini",
+			"hub": {
+				"endpoint": "http://agent-hub:9810"
+			}
+		}`), 0644)
+
+		var capturedConfig runtime.RunConfig
+		mockRT := &runtime.MockRuntime{
+			ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+				return []api.AgentInfo{}, nil
+			},
+			RunFunc: func(ctx context.Context, cfg runtime.RunConfig) (string, error) {
+				capturedConfig = cfg
+				return "mock-id", nil
+			},
+		}
+
+		mgr := NewManager(mockRT)
+
+		_, err := mgr.Start(context.Background(), api.StartOptions{
+			Name:      "hub-disabled-agent",
+			GrovePath: projectScionDir,
+			NoAuth:    true,
+		})
+		if err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+
+		envMap := make(map[string]string)
+		for _, e := range capturedConfig.Env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		if _, exists := envMap["SCION_HUB_ENDPOINT"]; exists {
+			t.Error("expected SCION_HUB_ENDPOINT to NOT be set when hub.enabled=false, even with agent hub.endpoint")
+		}
+	})
+
+	t.Run("template env section hub endpoint suppressed when hub disabled", func(t *testing.T) {
+		// Agent scion-agent.json has env.SCION_HUB_ENDPOINT but grove says hub.enabled=false
+		agentDir := filepath.Join(projectScionDir, "agents", "hub-disabled-env")
+		os.MkdirAll(filepath.Join(agentDir, "home"), 0755)
+		os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(`{
+			"harness": "gemini",
+			"env": {
+				"SCION_HUB_ENDPOINT": "http://host.docker.internal:8080"
+			}
+		}`), 0644)
+
+		var capturedConfig runtime.RunConfig
+		mockRT := &runtime.MockRuntime{
+			ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+				return []api.AgentInfo{}, nil
+			},
+			RunFunc: func(ctx context.Context, cfg runtime.RunConfig) (string, error) {
+				capturedConfig = cfg
+				return "mock-id", nil
+			},
+		}
+
+		mgr := NewManager(mockRT)
+
+		_, err := mgr.Start(context.Background(), api.StartOptions{
+			Name:      "hub-disabled-env",
+			GrovePath: projectScionDir,
+			NoAuth:    true,
+		})
+		if err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+
+		envMap := make(map[string]string)
+		for _, e := range capturedConfig.Env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		if _, exists := envMap["SCION_HUB_ENDPOINT"]; exists {
+			t.Error("expected SCION_HUB_ENDPOINT to NOT be set when hub.enabled=false, even with env section override")
+		}
+	})
+}
+
 func TestStartScionConfigEnvHubEndpointOverridesAll(t *testing.T) {
 	// Integration test verifying the full priority chain:
 	// grove settings -> hub.endpoint -> env.SCION_HUB_ENDPOINT

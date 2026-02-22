@@ -882,6 +882,97 @@ func TestCreateAgentHubEndpointFromGroveSettings(t *testing.T) {
 	})
 }
 
+// TestCreateAgentGroveHubEndpointSuppressedWhenDisabled tests that grove endpoint
+// is suppressed when hub.enabled=false, while dispatcher-provided endpoint still works.
+func TestCreateAgentGroveHubEndpointSuppressedWhenDisabled(t *testing.T) {
+	t.Run("grove hub endpoint suppressed when hub disabled", func(t *testing.T) {
+		srv, mgr := newTestServerWithEnvCapture()
+
+		// Create a grove directory with hub.enabled=false but endpoint configured
+		groveDir := filepath.Join(t.TempDir(), ".scion")
+		if err := os.MkdirAll(groveDir, 0755); err != nil {
+			t.Fatalf("failed to create grove dir: %v", err)
+		}
+		settingsContent := `hub:
+  enabled: false
+  endpoint: "https://scionhub.loophole.site"
+`
+		if err := os.WriteFile(filepath.Join(groveDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+			t.Fatalf("failed to write settings: %v", err)
+		}
+
+		body := `{
+			"name": "grove-disabled-agent",
+			"grovePath": "` + groveDir + `",
+			"config": {"template": "claude"}
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+		}
+
+		if mgr.lastEnv == nil {
+			t.Fatal("expected environment variables to be set")
+		}
+
+		// Grove endpoint should NOT be used when hub.enabled=false
+		if _, exists := mgr.lastEnv["SCION_HUB_ENDPOINT"]; exists {
+			t.Error("expected SCION_HUB_ENDPOINT to NOT be set when grove has hub.enabled=false")
+		}
+		if _, exists := mgr.lastEnv["SCION_HUB_URL"]; exists {
+			t.Error("expected SCION_HUB_URL to NOT be set when grove has hub.enabled=false")
+		}
+	})
+
+	t.Run("dispatcher endpoint still works when grove hub disabled", func(t *testing.T) {
+		srv, mgr := newTestServerWithEnvCapture()
+
+		// Create a grove directory with hub.enabled=false
+		groveDir := filepath.Join(t.TempDir(), ".scion")
+		if err := os.MkdirAll(groveDir, 0755); err != nil {
+			t.Fatalf("failed to create grove dir: %v", err)
+		}
+		settingsContent := `hub:
+  enabled: false
+  endpoint: "https://scionhub.loophole.site"
+`
+		if err := os.WriteFile(filepath.Join(groveDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+			t.Fatalf("failed to write settings: %v", err)
+		}
+
+		// Dispatcher provides its own hub endpoint (authoritative in hosted mode)
+		body := `{
+			"name": "dispatcher-endpoint-agent",
+			"hubEndpoint": "https://hub.authoritative.com",
+			"grovePath": "` + groveDir + `",
+			"config": {"template": "claude"}
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+		}
+
+		if mgr.lastEnv == nil {
+			t.Fatal("expected environment variables to be set")
+		}
+
+		// Dispatcher-provided endpoint should still be used (it's authoritative)
+		if got := mgr.lastEnv["SCION_HUB_ENDPOINT"]; got != "https://hub.authoritative.com" {
+			t.Errorf("expected SCION_HUB_ENDPOINT='https://hub.authoritative.com' from dispatcher, got %q", got)
+		}
+	})
+}
+
 // gitCloneCapturingManager captures env and GitClone from Start options.
 type gitCloneCapturingManager struct {
 	mockManager
