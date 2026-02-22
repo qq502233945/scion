@@ -17,23 +17,56 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/agent"
+	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 	"github.com/ptone/scion-agent/pkg/runtime"
 	"github.com/spf13/cobra"
 )
 
-var stopRm bool
+var (
+	stopRm  bool
+	stopAll bool
+)
 
 // stopCmd represents the stop command
 var stopCmd = &cobra.Command{
-	Use:               "stop <agent>",
-	Short:             "Stop an agent",
-	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: getAgentNames,
+	Use:   "stop [agent]",
+	Short: "Stop an agent",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if stopAll {
+			if len(args) > 0 {
+				return fmt.Errorf("no arguments allowed when using --all")
+			}
+			return nil
+		}
+		if len(args) != 1 {
+			return fmt.Errorf("requires exactly 1 argument (agent name)")
+		}
+		return nil
+	},
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if stopAll {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return getAgentNames(cmd, args, toComplete)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if stopAll {
+			hubCtx, err := CheckHubAvailability(grovePath)
+			if err != nil {
+				return err
+			}
+			if hubCtx != nil {
+				return stopAllAgentsViaHub(hubCtx)
+			}
+			return stopAllAgents()
+		}
+
 		agentName := args[0]
 
 		// Check if Hub should be used, excluding the target agent from sync requirements.
@@ -92,6 +125,309 @@ var stopCmd = &cobra.Command{
 	},
 }
 
+// stopAllAgents stops all running agents in the current grove using the local runtime.
+func stopAllAgents() error {
+	rt := runtime.GetRuntime(grovePath, profile)
+	mgr := agent.NewManager(rt)
+
+	filters := map[string]string{
+		"scion.agent": "true",
+	}
+
+	projectDir, _ := config.GetResolvedProjectDir(grovePath)
+	if projectDir != "" {
+		filters["scion.grove_path"] = projectDir
+		filters["scion.grove"] = config.GetGroveName(projectDir)
+	}
+
+	agents, err := mgr.List(context.Background(), filters)
+	if err != nil {
+		return err
+	}
+
+	// Filter for running agents
+	type runningAgent struct {
+		Name string
+	}
+	var running []runningAgent
+	for _, a := range agents {
+		if a.ContainerID == "" {
+			continue
+		}
+
+		agentName := a.Labels["scion.name"]
+		if agentName == "" {
+			continue
+		}
+
+		status := strings.ToLower(a.ContainerStatus)
+		if strings.HasPrefix(status, "up") ||
+			strings.HasPrefix(status, "running") {
+			running = append(running, runningAgent{Name: agentName})
+		}
+	}
+
+	if len(running) == 0 {
+		if isJSONOutput() {
+			return outputJSON(map[string]interface{}{
+				"status":  "success",
+				"command": "stop",
+				"message": "No running agents found.",
+				"results": []interface{}{},
+			})
+		}
+		statusln("No running agents found.")
+		return nil
+	}
+
+	type agentResult struct {
+		Name    string
+		Status  string
+		Error   string
+		Removed bool
+	}
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		results []agentResult
+	)
+
+	for _, ra := range running {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+
+			res := agentResult{Name: name, Status: "success"}
+
+			effectiveProfile := profile
+			if effectiveProfile == "" {
+				effectiveProfile = agent.GetSavedProfile(name, grovePath)
+			}
+
+			agentRt := runtime.GetRuntime(grovePath, effectiveProfile)
+			agentMgr := agent.NewManager(agentRt)
+
+			if err := agentMgr.Stop(context.Background(), name); err != nil {
+				res.Status = "error"
+				res.Error = err.Error()
+				mu.Lock()
+				results = append(results, res)
+				mu.Unlock()
+				return
+			}
+
+			_ = agent.UpdateAgentConfig(name, grovePath, "stopped", "", "")
+
+			if stopRm {
+				if _, err := agentMgr.Delete(context.Background(), name, true, grovePath, false); err != nil {
+					res.Status = "error"
+					res.Error = fmt.Sprintf("stopped but failed to remove: %v", err)
+					mu.Lock()
+					results = append(results, res)
+					mu.Unlock()
+					return
+				}
+				res.Removed = true
+			}
+
+			mu.Lock()
+			results = append(results, res)
+			mu.Unlock()
+		}(ra.Name)
+	}
+
+	wg.Wait()
+
+	if isJSONOutput() {
+		jsonResults := make([]map[string]interface{}, len(results))
+		hasErrors := false
+		for i, r := range results {
+			entry := map[string]interface{}{
+				"agent":  r.Name,
+				"status": r.Status,
+			}
+			if r.Error != "" {
+				entry["error"] = r.Error
+				hasErrors = true
+			}
+			if r.Removed {
+				entry["removed"] = true
+			}
+			jsonResults[i] = entry
+		}
+		overallStatus := "success"
+		if hasErrors {
+			overallStatus = "partial"
+		}
+		return outputJSON(map[string]interface{}{
+			"status":  overallStatus,
+			"command": "stop",
+			"results": jsonResults,
+		})
+	}
+
+	var errs []string
+	for _, r := range results {
+		if r.Error != "" {
+			statusf("Agent '%s': error: %s\n", r.Name, r.Error)
+			errs = append(errs, fmt.Sprintf("%s: %s", r.Name, r.Error))
+		} else if r.Removed {
+			statusf("Agent '%s' stopped and removed.\n", r.Name)
+		} else {
+			statusf("Agent '%s' stopped.\n", r.Name)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to stop some agents:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
+// stopAllAgentsViaHub stops all running agents in the current grove via the Hub.
+func stopAllAgentsViaHub(hubCtx *HubContext) error {
+	PrintUsingHub(hubCtx.Endpoint)
+
+	groveID, err := GetGroveID(hubCtx)
+	if err != nil {
+		return wrapHubError(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	agentSvc := hubCtx.Client.GroveAgents(groveID)
+	resp, err := agentSvc.List(ctx, &hubclient.ListAgentsOptions{})
+	if err != nil {
+		return wrapHubError(fmt.Errorf("failed to list agents via Hub: %w", err))
+	}
+
+	// Filter for running agents
+	var running []hubclient.Agent
+	for _, a := range resp.Agents {
+		status := strings.ToLower(a.ContainerStatus)
+		if strings.HasPrefix(status, "up") ||
+			strings.HasPrefix(status, "running") {
+			running = append(running, a)
+		}
+	}
+
+	if len(running) == 0 {
+		if isJSONOutput() {
+			return outputJSON(map[string]interface{}{
+				"status":  "success",
+				"command": "stop",
+				"message": "No running agents found.",
+				"results": []interface{}{},
+			})
+		}
+		statusln("No running agents found.")
+		return nil
+	}
+
+	type agentResult struct {
+		Name    string
+		Status  string
+		Error   string
+		Removed bool
+	}
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		results []agentResult
+	)
+
+	for _, a := range running {
+		wg.Add(1)
+		go func(ag hubclient.Agent) {
+			defer wg.Done()
+
+			res := agentResult{Name: ag.Name, Status: "success"}
+
+			agentCtx, agentCancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer agentCancel()
+
+			if err := agentSvc.Stop(agentCtx, ag.Name); err != nil {
+				res.Status = "error"
+				res.Error = wrapHubError(fmt.Errorf("failed to stop: %w", err)).Error()
+				mu.Lock()
+				results = append(results, res)
+				mu.Unlock()
+				return
+			}
+
+			if stopRm {
+				opts := &hubclient.DeleteAgentOptions{
+					DeleteFiles:  true,
+					RemoveBranch: false,
+				}
+				if err := agentSvc.Delete(agentCtx, ag.Name, opts); err != nil {
+					res.Status = "error"
+					res.Error = wrapHubError(fmt.Errorf("stopped but failed to remove: %w", err)).Error()
+					mu.Lock()
+					results = append(results, res)
+					mu.Unlock()
+					return
+				}
+				res.Removed = true
+			}
+
+			mu.Lock()
+			results = append(results, res)
+			mu.Unlock()
+		}(a)
+	}
+
+	wg.Wait()
+
+	if isJSONOutput() {
+		jsonResults := make([]map[string]interface{}, len(results))
+		hasErrors := false
+		for i, r := range results {
+			entry := map[string]interface{}{
+				"agent":  r.Name,
+				"status": r.Status,
+			}
+			if r.Error != "" {
+				entry["error"] = r.Error
+				hasErrors = true
+			}
+			if r.Removed {
+				entry["removed"] = true
+			}
+			jsonResults[i] = entry
+		}
+		overallStatus := "success"
+		if hasErrors {
+			overallStatus = "partial"
+		}
+		return outputJSON(map[string]interface{}{
+			"status":  overallStatus,
+			"command": "stop",
+			"results": jsonResults,
+		})
+	}
+
+	var errs []string
+	for _, r := range results {
+		if r.Error != "" {
+			statusf("Agent '%s': error: %s\n", r.Name, r.Error)
+			errs = append(errs, fmt.Sprintf("%s: %s", r.Name, r.Error))
+		} else if r.Removed {
+			statusf("Agent '%s' stopped and removed via Hub.\n", r.Name)
+		} else {
+			statusf("Agent '%s' stopped via Hub.\n", r.Name)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to stop some agents via Hub:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
 func stopAgentViaHub(hubCtx *HubContext, agentName string) error {
 	PrintUsingHub(hubCtx.Endpoint)
 	statusf("Stopping agent '%s'...\n", agentName)
@@ -148,5 +484,6 @@ func stopAgentViaHub(hubCtx *HubContext, agentName string) error {
 
 func init() {
 	stopCmd.Flags().BoolVar(&stopRm, "rm", false, "Remove the agent after stopping")
+	stopCmd.Flags().BoolVarP(&stopAll, "all", "a", false, "Stop all running agents in the current grove")
 	rootCmd.AddCommand(stopCmd)
 }
