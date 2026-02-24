@@ -1,0 +1,4 @@
+schema_version: "1"
+description: "ADK (Agent Development Kit) coding assistant"
+agent_instructions: agents.md
+default_harness_config: adk

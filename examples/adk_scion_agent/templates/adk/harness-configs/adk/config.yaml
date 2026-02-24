@@ -1,0 +1,7 @@
+harness: generic
+image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-adk-agent:latest
+user: scion
+args:
+  - adk
+  - run
+  - /opt/adk_scion_agent/adk_scion_agent

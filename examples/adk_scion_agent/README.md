@@ -23,6 +23,33 @@ The agent starts an interactive session. Type a task and the agent will work thr
 
 When running outside a scion container, `sciontool` won't be on PATH — the agent works normally but status reporting is silently skipped.
 
+## Container Image
+
+The included `Dockerfile` builds on `scion-base` (which provides sciontool, tmux, git, and Python 3):
+
+```bash
+docker build -t scion-adk-agent examples/adk_scion_agent/
+```
+
+The image installs `google-adk` into a virtualenv and copies the agent source to `/opt/adk_scion_agent/`. The default CMD is `adk run /opt/adk_scion_agent/adk_scion_agent`.
+
+## Deploying via Scion Template
+
+A ready-to-use template is provided in `templates/adk/`. To deploy this agent in a grove:
+
+```bash
+# Copy the template into your grove's .scion directory
+cp -r examples/adk_scion_agent/templates/adk .scion/templates/adk
+
+# Copy the harness-config (or place it globally at ~/.scion/harness-configs/adk/)
+cp -r examples/adk_scion_agent/templates/adk/harness-configs/adk .scion/harness-configs/adk
+
+# Start an agent using the template
+scion start my-agent --template adk
+```
+
+The template uses the **generic** harness with `args` set to `["adk", "run", "/opt/adk_scion_agent/adk_scion_agent"]`. The generic harness passes these as the container command, and scion wraps it in a tmux session for message delivery.
+
 ## Running Inside a Scion Container
 
 When scion launches this agent inside a container:
@@ -74,11 +101,19 @@ For Vertex AI, set `GOOGLE_GENAI_USE_VERTEXAI=true` and configure Application De
 
 ```
 adk_scion_agent/
+├── Dockerfile         # Container image (built on scion-base)
 ├── __init__.py        # ADK package entry point
 ├── agent.py           # root_agent definition, auth bridging, model config
 ├── tools.py           # file_write and sciontool_status tools
 ├── callbacks.py       # ADK callbacks → scion status updates
 ├── sciontool.py       # Low-level sciontool subprocess wrapper
 ├── .env.example       # Environment variable template
-└── README.md          # This file
+├── README.md          # This file
+└── templates/
+    └── adk/
+        ├── scion-agent.yaml           # Template definition
+        ├── agents.md                  # Agent instructions (sciontool lifecycle)
+        └── harness-configs/
+            └── adk/
+                └── config.yaml        # Generic harness config (image + args)
 ```
