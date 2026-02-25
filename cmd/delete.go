@@ -76,9 +76,22 @@ var deleteCmd = &cobra.Command{
 				return fmt.Errorf("--stopped flag is not yet supported when using Hub integration\n\nTo delete stopped agents locally, use: scion --no-hub delete --stopped")
 			}
 
+			// Require an explicit grove context — error if not in a grove (unless --global)
+			resolvedGrove, _, err := config.RequireGrovePath(grovePath)
+			if err != nil {
+				return err
+			}
+
 			rt := runtime.GetRuntime(grovePath, profile)
 			mgr := agent.NewManager(rt)
-			agents, err := mgr.List(context.Background(), nil)
+
+			filters := map[string]string{
+				"scion.agent":      "true",
+				"scion.grove_path": resolvedGrove,
+				"scion.grove":      config.GetGroveName(resolvedGrove),
+			}
+
+			agents, err := mgr.List(context.Background(), filters)
 			if err != nil {
 				return err
 			}
@@ -108,7 +121,7 @@ var deleteCmd = &cobra.Command{
 
 				targetGrovePath := a.GrovePath
 				if targetGrovePath == "" {
-					targetGrovePath = grovePath
+					targetGrovePath = resolvedGrove
 				}
 
 				branchDeleted, err := mgr.Delete(context.Background(), agentName, true, targetGrovePath, !preserveBranch)

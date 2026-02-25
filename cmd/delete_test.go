@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,7 @@ type deleteTestState struct {
 	preserveBranch bool
 	noHub          bool
 	autoConfirm    bool
+	deleteStopped  bool
 }
 
 func saveDeleteTestState() deleteTestState {
@@ -43,6 +45,7 @@ func saveDeleteTestState() deleteTestState {
 		preserveBranch: preserveBranch,
 		noHub:          noHub,
 		autoConfirm:    autoConfirm,
+		deleteStopped:  deleteStopped,
 	}
 }
 
@@ -52,6 +55,7 @@ func (s deleteTestState) restore() {
 	preserveBranch = s.preserveBranch
 	noHub = s.noHub
 	autoConfirm = s.autoConfirm
+	deleteStopped = s.deleteStopped
 }
 
 // createAgentDir creates a minimal agent directory at <groveDir>/agents/<name>
@@ -314,4 +318,53 @@ func TestDeleteAgentsViaHub_NoLocalFiles(t *testing.T) {
 
 	require.Len(t, *deletedAgents, 1)
 	assert.Equal(t, "hub-only-agent", (*deletedAgents)[0])
+}
+
+func TestDeleteStopped_RequiresGroveContext(t *testing.T) {
+	orig := saveDeleteTestState()
+	defer orig.restore()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+
+	// Set CWD to a directory without .scion so grove resolution fails
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	noHub = true
+	grovePath = ""
+	deleteStopped = true
+
+	// Running delete --stopped outside a grove should error
+	err := deleteCmd.RunE(deleteCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not in a scion project")
+}
+
+func TestDeleteStopped_AcceptsGlobalFlag(t *testing.T) {
+	orig := saveDeleteTestState()
+	defer orig.restore()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+
+	// Create global .scion directory
+	globalDir := filepath.Join(tmpHome, ".scion")
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0755))
+
+	// Set CWD to a directory without .scion
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	// Verify that RequireGrovePath("global") resolves correctly even outside a grove.
+	// The full command flow requires Docker for runtime.List, so we test the grove
+	// resolution layer directly rather than the entire RunE.
+	resolvedGrove, isGlobal, err := config.RequireGrovePath("global")
+	require.NoError(t, err)
+	assert.True(t, isGlobal, "should resolve as global grove")
+	assert.Equal(t, globalDir, resolvedGrove)
 }
