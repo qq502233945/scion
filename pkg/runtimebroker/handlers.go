@@ -917,15 +917,40 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 	if opts.Env == nil {
 		opts.Env = make(map[string]string)
 	}
-	// Hub endpoint: use ContainerHubEndpoint if set, else fall back to config
+	// Hub endpoint resolution — same priority chain as createAgent:
+	// 1. Request's HubEndpoint (from Hub dispatcher) / Broker config fallback
+	// 2. ContainerHubEndpoint override (container-accessible address)
+	// 3. Grove settings hub.endpoint (highest priority)
+	hubEndpoint := ""
+	if s.config.HubEndpoint != "" {
+		hubEndpoint = s.config.HubEndpoint
+	}
 	if s.config.ContainerHubEndpoint != "" {
-		opts.Env["SCION_HUB_ENDPOINT"] = s.config.ContainerHubEndpoint
-		opts.Env["SCION_HUB_URL"] = s.config.ContainerHubEndpoint
-	} else if s.config.HubEndpoint != "" {
-		if _, ok := opts.Env["SCION_HUB_ENDPOINT"]; !ok {
-			opts.Env["SCION_HUB_ENDPOINT"] = s.config.HubEndpoint
-			opts.Env["SCION_HUB_URL"] = s.config.HubEndpoint
+		hubEndpoint = s.config.ContainerHubEndpoint
+	}
+	// Override with grove settings if available. The grove's hub.endpoint
+	// reflects the externally-accessible Hub URL that agents inside
+	// containers need to reach the Hub. This takes precedence because the
+	// broker's own config may only know its localhost address.
+	grovePath := startReq.GrovePath
+	if grovePath == "" {
+		grovePath = opts.GrovePath
+	}
+	if grovePath != "" {
+		if groveSettings, err := config.LoadSettingsFromDir(grovePath); err == nil {
+			if !groveSettings.IsHubExplicitlyDisabled() {
+				if ep := groveSettings.GetHubEndpoint(); ep != "" {
+					hubEndpoint = ep
+					if s.config.Debug {
+						slog.Debug("startAgent: hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", grovePath)
+					}
+				}
+			}
 		}
+	}
+	if hubEndpoint != "" {
+		opts.Env["SCION_HUB_ENDPOINT"] = hubEndpoint
+		opts.Env["SCION_HUB_URL"] = hubEndpoint
 	}
 	if s.config.BrokerName != "" {
 		opts.Env["SCION_BROKER_NAME"] = s.config.BrokerName

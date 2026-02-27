@@ -1526,6 +1526,92 @@ func TestCreateAgentGroveSlugNotUsedWhenGrovePathSet(t *testing.T) {
 	}
 }
 
+// TestStartAgentGroveSettingsOverridesHubEndpoint verifies that the startAgent
+// handler uses the grove settings hub.endpoint rather than the broker's config
+// HubEndpoint (which defaults to localhost in combo mode).
+func TestStartAgentGroveSettingsOverridesHubEndpoint(t *testing.T) {
+	cfg := DefaultServerConfig()
+	cfg.BrokerID = "test-broker-id"
+	cfg.BrokerName = "test-host"
+	cfg.HubEndpoint = "http://localhost:9810" // broker's default (combo mode)
+	cfg.Debug = true
+
+	mgr := &provisionCapturingManager{}
+	rt := &runtime.MockRuntime{}
+	srv := New(cfg, mgr, rt)
+
+	// Create a temp grove dir with settings.yaml containing the correct external endpoint
+	groveDir := t.TempDir()
+	settingsContent := "hub:\n  endpoint: https://hub.production.example.com\n"
+	if err := os.WriteFile(filepath.Join(groveDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("failed to write settings.yaml: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"grovePath": %q}`, groveDir)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/test-agent/start", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+
+	if !mgr.startCalled {
+		t.Fatal("expected Start to be called")
+	}
+
+	// Grove settings hub.endpoint should override the broker's localhost endpoint
+	if got := mgr.lastOpts.Env["SCION_HUB_ENDPOINT"]; got != "https://hub.production.example.com" {
+		t.Errorf("expected SCION_HUB_ENDPOINT='https://hub.production.example.com' from grove settings, got %q", got)
+	}
+	if got := mgr.lastOpts.Env["SCION_HUB_URL"]; got != "https://hub.production.example.com" {
+		t.Errorf("expected SCION_HUB_URL='https://hub.production.example.com' from grove settings, got %q", got)
+	}
+}
+
+// TestStartAgentBrokerConfigUsedWhenNoGroveSettings verifies that the broker's
+// config HubEndpoint is used as fallback when grove settings don't specify one.
+func TestStartAgentBrokerConfigUsedWhenNoGroveSettings(t *testing.T) {
+	cfg := DefaultServerConfig()
+	cfg.BrokerID = "test-broker-id"
+	cfg.BrokerName = "test-host"
+	cfg.HubEndpoint = "http://localhost:9810"
+	cfg.Debug = true
+
+	mgr := &provisionCapturingManager{}
+	rt := &runtime.MockRuntime{}
+	srv := New(cfg, mgr, rt)
+
+	// Create a temp grove dir with settings.yaml but no hub endpoint
+	groveDir := t.TempDir()
+	settingsContent := "harnesses:\n  claude:\n    model: sonnet\n"
+	if err := os.WriteFile(filepath.Join(groveDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("failed to write settings.yaml: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"grovePath": %q}`, groveDir)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/test-agent/start", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+
+	if !mgr.startCalled {
+		t.Fatal("expected Start to be called")
+	}
+
+	// Without grove settings hub.endpoint, broker config should be used
+	if got := mgr.lastOpts.Env["SCION_HUB_ENDPOINT"]; got != "http://localhost:9810" {
+		t.Errorf("expected SCION_HUB_ENDPOINT='http://localhost:9810' from broker config, got %q", got)
+	}
+}
+
 func TestStartAgentGroveSlugResolvesGrovePath(t *testing.T) {
 	// When the startAgent handler receives groveSlug with no grovePath
 	// (hub-native grove), it should resolve GrovePath from the slug.
