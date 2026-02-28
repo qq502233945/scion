@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 )
 
@@ -100,19 +101,6 @@ type HubConnectionInfo struct {
 // Agent Types
 // ============================================================================
 
-// Agent status values matching the API specification.
-const (
-	AgentStatusCreated      = "created"
-	AgentStatusCloning      = "cloning"
-	AgentStatusPending      = "pending"
-	AgentStatusProvisioning = "provisioning"
-	AgentStatusStarting     = "starting"
-	AgentStatusRunning      = "running"
-	AgentStatusStopping     = "stopping"
-	AgentStatusStopped      = "stopped"
-	AgentStatusError        = "error"
-)
-
 // AgentResponse represents an agent in API responses.
 type AgentResponse struct {
 	ID              string            `json:"id,omitempty"`          // Hub UUID
@@ -125,6 +113,8 @@ type AgentResponse struct {
 	GroveID         string            `json:"groveId,omitempty"`
 	UserID          string            `json:"userId,omitempty"`
 	Status          string            `json:"status"`
+	Phase           string            `json:"phase,omitempty"`
+	Activity        string            `json:"activity,omitempty"`
 	StatusReason    string            `json:"statusReason,omitempty"`
 	Ready           bool              `json:"ready,omitempty"`
 	ContainerStatus string            `json:"containerStatus,omitempty"`
@@ -311,18 +301,40 @@ type StatsResponse struct {
 
 // AgentInfoToResponse converts an api.AgentInfo to an AgentResponse.
 func AgentInfoToResponse(info api.AgentInfo) AgentResponse {
-	status := info.Status
-	if status == "" {
-		// Map container status to agent status
+	phase := info.Phase
+	activity := info.Activity
+
+	// When Phase/Activity are present (new structured path), derive status
+	// via DisplayStatus for backward compatibility.
+	// When absent (legacy), fall back to container-status-based mapping.
+	var status string
+	if phase != "" {
+		as := state.AgentState{
+			Phase:    state.Phase(phase),
+			Activity: state.Activity(activity),
+		}
+		status = as.DisplayStatus()
+	} else if info.Status != "" {
+		status = info.Status
+		// Legacy: infer phase from status for backward compat
+		if state.Phase(info.Status).IsValid() {
+			phase = info.Status
+		}
+	} else {
+		// Legacy fallback: derive phase and status from container status
 		switch {
 		case info.ContainerStatus == "":
-			status = AgentStatusPending
+			phase = string(state.PhaseCreated)
+			status = string(state.PhaseCreated)
 		case containsAny(info.ContainerStatus, "up", "running"):
-			status = AgentStatusRunning
+			phase = string(state.PhaseRunning)
+			status = string(state.PhaseRunning)
 		case containsAny(info.ContainerStatus, "created"):
-			status = AgentStatusProvisioning
+			phase = string(state.PhaseProvisioning)
+			status = string(state.PhaseProvisioning)
 		case containsAny(info.ContainerStatus, "exited", "stopped"):
-			status = AgentStatusStopped
+			phase = string(state.PhaseStopped)
+			status = string(state.PhaseStopped)
 		default:
 			status = info.ContainerStatus
 		}
@@ -338,10 +350,12 @@ func AgentInfoToResponse(info api.AgentInfo) AgentResponse {
 		RuntimeType:     info.Runtime,
 		GroveID:         info.GroveID,
 		Status:          status,
+		Phase:           phase,
+		Activity:        activity,
 		ContainerStatus: info.ContainerStatus,
 		Labels:          info.Labels,
 		CreatedAt:       info.Created,
-		Ready:           status == AgentStatusRunning,
+		Ready:           phase == string(state.PhaseRunning),
 	}
 
 	if info.Template != "" || info.Image != "" {

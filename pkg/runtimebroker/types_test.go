@@ -17,35 +17,88 @@ package runtimebroker
 import (
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 )
 
 func TestAgentInfoToResponse(t *testing.T) {
 	tests := []struct {
-		name           string
-		info           api.AgentInfo
-		expectedStatus string
-		expectedReady  bool
+		name            string
+		info            api.AgentInfo
+		expectedStatus  string
+		expectedPhase   string
+		expectedActivity string
+		expectedReady   bool
 	}{
 		{
-			name: "status already set passes through unchanged",
+			name: "phase and activity set uses structured path",
+			info: api.AgentInfo{
+				Name:     "agent-structured",
+				Phase:    "running",
+				Activity: "thinking",
+			},
+			expectedStatus:   "thinking",
+			expectedPhase:    "running",
+			expectedActivity: "thinking",
+			expectedReady:    true,
+		},
+		{
+			name: "phase running with no activity uses phase as status",
+			info: api.AgentInfo{
+				Name:  "agent-phase-only",
+				Phase: "running",
+			},
+			expectedStatus:   "running",
+			expectedPhase:    "running",
+			expectedActivity: "",
+			expectedReady:    true,
+		},
+		{
+			name: "phase stopped clears activity",
+			info: api.AgentInfo{
+				Name:  "agent-stopped-phase",
+				Phase: "stopped",
+			},
+			expectedStatus:   "stopped",
+			expectedPhase:    "stopped",
+			expectedActivity: "",
+			expectedReady:    false,
+		},
+		{
+			name: "phase with waiting_for_input activity",
+			info: api.AgentInfo{
+				Name:     "agent-waiting",
+				Phase:    "running",
+				Activity: "waiting_for_input",
+			},
+			expectedStatus:   "waiting_for_input",
+			expectedPhase:    "running",
+			expectedActivity: "waiting_for_input",
+			expectedReady:    true,
+		},
+		{
+			name: "legacy status already set passes through unchanged",
 			info: api.AgentInfo{
 				Name:            "agent-1",
 				Status:          "running",
 				ContainerStatus: "created", // should be ignored
 			},
-			expectedStatus: "running",
-			expectedReady:  true,
+			expectedStatus:   "running",
+			expectedPhase:    "running",
+			expectedActivity: "",
+			expectedReady:    true,
 		},
 		{
-			name: "status already set to non-running value",
+			name: "legacy status set to non-running value",
 			info: api.AgentInfo{
 				Name:            "agent-2",
 				Status:          "resumed",
 				ContainerStatus: "Up 5 minutes",
 			},
-			expectedStatus: "resumed",
-			expectedReady:  false,
+			expectedStatus:   "resumed",
+			expectedPhase:    "",
+			expectedActivity: "",
+			expectedReady:    false,
 		},
 		{
 			name: "empty status with container up maps to running",
@@ -53,8 +106,10 @@ func TestAgentInfoToResponse(t *testing.T) {
 				Name:            "agent-3",
 				ContainerStatus: "Up 2 hours",
 			},
-			expectedStatus: AgentStatusRunning,
-			expectedReady:  true,
+			expectedStatus:   string(state.PhaseRunning),
+			expectedPhase:    string(state.PhaseRunning),
+			expectedActivity: "",
+			expectedReady:    true,
 		},
 		{
 			name: "empty status with container running maps to running",
@@ -62,8 +117,10 @@ func TestAgentInfoToResponse(t *testing.T) {
 				Name:            "agent-4",
 				ContainerStatus: "running",
 			},
-			expectedStatus: AgentStatusRunning,
-			expectedReady:  true,
+			expectedStatus:   string(state.PhaseRunning),
+			expectedPhase:    string(state.PhaseRunning),
+			expectedActivity: "",
+			expectedReady:    true,
 		},
 		{
 			name: "empty status with container created maps to provisioning",
@@ -71,8 +128,10 @@ func TestAgentInfoToResponse(t *testing.T) {
 				Name:            "agent-5",
 				ContainerStatus: "created",
 			},
-			expectedStatus: AgentStatusProvisioning,
-			expectedReady:  false,
+			expectedStatus:   string(state.PhaseProvisioning),
+			expectedPhase:    string(state.PhaseProvisioning),
+			expectedActivity: "",
+			expectedReady:    false,
 		},
 		{
 			name: "empty status with container exited maps to stopped",
@@ -80,8 +139,10 @@ func TestAgentInfoToResponse(t *testing.T) {
 				Name:            "agent-6",
 				ContainerStatus: "Exited (0) 5 minutes ago",
 			},
-			expectedStatus: AgentStatusStopped,
-			expectedReady:  false,
+			expectedStatus:   string(state.PhaseStopped),
+			expectedPhase:    string(state.PhaseStopped),
+			expectedActivity: "",
+			expectedReady:    false,
 		},
 		{
 			name: "empty status with container stopped maps to stopped",
@@ -89,16 +150,20 @@ func TestAgentInfoToResponse(t *testing.T) {
 				Name:            "agent-7",
 				ContainerStatus: "stopped",
 			},
-			expectedStatus: AgentStatusStopped,
-			expectedReady:  false,
+			expectedStatus:   string(state.PhaseStopped),
+			expectedPhase:    string(state.PhaseStopped),
+			expectedActivity: "",
+			expectedReady:    false,
 		},
 		{
-			name: "empty status with empty container status maps to pending",
+			name: "empty status with empty container status maps to created",
 			info: api.AgentInfo{
 				Name: "agent-8",
 			},
-			expectedStatus: AgentStatusPending,
-			expectedReady:  false,
+			expectedStatus:   string(state.PhaseCreated),
+			expectedPhase:    string(state.PhaseCreated),
+			expectedActivity: "",
+			expectedReady:    false,
 		},
 	}
 
@@ -107,6 +172,12 @@ func TestAgentInfoToResponse(t *testing.T) {
 			resp := AgentInfoToResponse(tt.info)
 			if resp.Status != tt.expectedStatus {
 				t.Errorf("Status = %q, want %q", resp.Status, tt.expectedStatus)
+			}
+			if resp.Phase != tt.expectedPhase {
+				t.Errorf("Phase = %q, want %q", resp.Phase, tt.expectedPhase)
+			}
+			if resp.Activity != tt.expectedActivity {
+				t.Errorf("Activity = %q, want %q", resp.Activity, tt.expectedActivity)
 			}
 			if resp.Ready != tt.expectedReady {
 				t.Errorf("Ready = %v, want %v", resp.Ready, tt.expectedReady)

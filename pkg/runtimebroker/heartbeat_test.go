@@ -203,9 +203,9 @@ func TestHeartbeatService_IncludesAgentInfo(t *testing.T) {
 	client := &mockRuntimeBrokerService{}
 	manager := &heartbeatMockManager{
 		agents: []api.AgentInfo{
-			{Name: "agent-1", GroveID: "grove-1", Status: "running"},
-			{Name: "agent-2", GroveID: "grove-1", Status: "waiting_for_input"},
-			{Name: "agent-3", Grove: "grove-2", Status: "completed"},
+			{Name: "agent-1", GroveID: "grove-1", Status: "running", Phase: "running", Activity: "thinking"},
+			{Name: "agent-2", GroveID: "grove-1", Status: "waiting_for_input", Phase: "running", Activity: "waiting_for_input"},
+			{Name: "agent-3", Grove: "grove-2", Status: "completed", Phase: "running", Activity: "completed"},
 		},
 	}
 
@@ -236,6 +236,89 @@ func TestHeartbeatService_IncludesAgentInfo(t *testing.T) {
 	}
 	if groveCounts["grove-2"] != 1 {
 		t.Errorf("Expected grove-2 to have 1 agent, got %d", groveCounts["grove-2"])
+	}
+}
+
+func TestHeartbeatService_IncludesPhaseActivity(t *testing.T) {
+	client := &mockRuntimeBrokerService{}
+	manager := &heartbeatMockManager{
+		agents: []api.AgentInfo{
+			{
+				Name:     "agent-structured",
+				GroveID:  "grove-1",
+				Status:   "thinking",
+				Phase:    "running",
+				Activity: "thinking",
+			},
+			{
+				Name:     "agent-waiting",
+				GroveID:  "grove-1",
+				Status:   "waiting_for_input",
+				Phase:    "running",
+				Activity: "waiting_for_input",
+			},
+			{
+				Name:    "agent-stopped",
+				GroveID: "grove-1",
+				Status:  "stopped",
+				Phase:   "stopped",
+			},
+		},
+	}
+
+	svc := NewHeartbeatService(client, "test-host", time.Hour, manager, nil)
+	err := svc.ForceHeartbeat(context.Background())
+	if err != nil {
+		t.Fatalf("ForceHeartbeat failed: %v", err)
+	}
+
+	calls := client.getHeartbeatCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Expected 1 heartbeat call, got %d", len(calls))
+	}
+
+	heartbeat := calls[0].Heartbeat
+	if len(heartbeat.Groves) != 1 {
+		t.Fatalf("Expected 1 grove in heartbeat, got %d", len(heartbeat.Groves))
+	}
+
+	grove := heartbeat.Groves[0]
+	if len(grove.Agents) != 3 {
+		t.Fatalf("Expected 3 agents, got %d", len(grove.Agents))
+	}
+
+	// Build a map by slug for easy lookup
+	agentMap := make(map[string]hubclient.AgentHeartbeat)
+	for _, a := range grove.Agents {
+		agentMap[a.Slug] = a
+	}
+
+	// Verify structured fields flow through
+	structured := agentMap["agent-structured"]
+	if structured.Phase != "running" {
+		t.Errorf("agent-structured Phase = %q, want %q", structured.Phase, "running")
+	}
+	if structured.Activity != "thinking" {
+		t.Errorf("agent-structured Activity = %q, want %q", structured.Activity, "thinking")
+	}
+	if structured.Status != "thinking" {
+		t.Errorf("agent-structured Status = %q, want %q", structured.Status, "thinking")
+	}
+
+	waiting := agentMap["agent-waiting"]
+	if waiting.Phase != "running" {
+		t.Errorf("agent-waiting Phase = %q, want %q", waiting.Phase, "running")
+	}
+	if waiting.Activity != "waiting_for_input" {
+		t.Errorf("agent-waiting Activity = %q, want %q", waiting.Activity, "waiting_for_input")
+	}
+
+	stopped := agentMap["agent-stopped"]
+	if stopped.Phase != "stopped" {
+		t.Errorf("agent-stopped Phase = %q, want %q", stopped.Phase, "stopped")
+	}
+	if stopped.Activity != "" {
+		t.Errorf("agent-stopped Activity = %q, want empty", stopped.Activity)
 	}
 }
 

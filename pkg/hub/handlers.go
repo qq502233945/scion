@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/gcp"
@@ -3565,6 +3566,8 @@ type brokerGroveHeartbeat struct {
 type brokerAgentHeartbeat struct {
 	Slug            string `json:"slug"`            // Agent's URL-safe identifier (name)
 	Status          string `json:"status"`          // Session status (IDLE, THINKING, etc.)
+	Phase           string `json:"phase,omitempty"`
+	Activity        string `json:"activity,omitempty"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
 }
 
@@ -3604,41 +3607,57 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 			}
 
 			// Build status update with agent status and container status.
-			// Prefer the agent's activity status if present; fall back to
-			// container-derived lifecycle status; use terminal container
-			// status (exited/stopped) unconditionally.
+			// When the broker sends structured Phase/Activity fields, use
+			// them directly. Fall back to container-status derivation for
+			// backward compatibility with older brokers.
 			statusUpdate := store.AgentStatusUpdate{
 				ContainerStatus: agentHB.ContainerStatus,
 				Heartbeat:       true, // Ensures LastSeen is updated
 			}
 
-			// If the agent heartbeat includes an activity status, use it
-			if agentHB.Status != "" {
-				statusUpdate.Status = agentHB.Status
-			}
-
-			// Derive phase/status from container status to ensure agents
-			// registered via sync (not started via hub) get proper state.
-			// Terminal container states (exited/stopped) override agent status.
-			if agentHB.ContainerStatus != "" {
-				containerStatusLower := strings.ToLower(agentHB.ContainerStatus)
-				switch {
-				case strings.HasPrefix(containerStatusLower, "up") || containerStatusLower == "running":
-					statusUpdate.Phase = "running"
-					if statusUpdate.Status == "" {
-						statusUpdate.Status = store.AgentStatusRunning
+			if agentHB.Phase != "" {
+				// New structured path: broker sent Phase/Activity directly
+				statusUpdate.Phase = agentHB.Phase
+				statusUpdate.Activity = agentHB.Activity
+				if agentHB.Status != "" {
+					statusUpdate.Status = agentHB.Status
+				} else {
+					// Derive display status from Phase/Activity
+					as := state.AgentState{
+						Phase:    state.Phase(agentHB.Phase),
+						Activity: state.Activity(agentHB.Activity),
 					}
-				case strings.HasPrefix(containerStatusLower, "exited") || containerStatusLower == "stopped":
-					statusUpdate.Phase = "stopped"
-					statusUpdate.Activity = ""
-					statusUpdate.Status = store.AgentStatusStopped
-				case containerStatusLower == "created":
-					// Don't downgrade a running agent to provisioning — the
-					// container may briefly report "created" while the runtime
-					// is transitioning to started.
-					if agent.Status != store.AgentStatusRunning && statusUpdate.Status == "" {
-						statusUpdate.Phase = "provisioning"
-						statusUpdate.Status = store.AgentStatusProvisioning
+					statusUpdate.Status = as.DisplayStatus()
+				}
+			} else {
+				// Legacy path: no structured fields, derive from Status and ContainerStatus
+				if agentHB.Status != "" {
+					statusUpdate.Status = agentHB.Status
+				}
+
+				// Derive phase/status from container status to ensure agents
+				// registered via sync (not started via hub) get proper state.
+				// Terminal container states (exited/stopped) override agent status.
+				if agentHB.ContainerStatus != "" {
+					containerStatusLower := strings.ToLower(agentHB.ContainerStatus)
+					switch {
+					case strings.HasPrefix(containerStatusLower, "up") || containerStatusLower == "running":
+						statusUpdate.Phase = "running"
+						if statusUpdate.Status == "" {
+							statusUpdate.Status = store.AgentStatusRunning
+						}
+					case strings.HasPrefix(containerStatusLower, "exited") || containerStatusLower == "stopped":
+						statusUpdate.Phase = "stopped"
+						statusUpdate.Activity = ""
+						statusUpdate.Status = store.AgentStatusStopped
+					case containerStatusLower == "created":
+						// Don't downgrade a running agent to provisioning — the
+						// container may briefly report "created" while the runtime
+						// is transitioning to started.
+						if agent.Status != store.AgentStatusRunning && statusUpdate.Status == "" {
+							statusUpdate.Phase = "provisioning"
+							statusUpdate.Status = store.AgentStatusProvisioning
+						}
 					}
 				}
 			}

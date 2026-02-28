@@ -98,6 +98,8 @@ type GroveHeartbeat struct {
 type AgentHeartbeat struct {
 	Slug            string `json:"slug"` // Agent's URL-safe identifier
 	Status          string `json:"status"`
+	Phase           string `json:"phase,omitempty"`
+	Activity        string `json:"activity,omitempty"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
 }
 

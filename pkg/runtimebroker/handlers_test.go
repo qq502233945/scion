@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/runtime"
@@ -579,8 +580,8 @@ func TestCreateAgentProvisionOnly(t *testing.T) {
 	}
 
 	// Agent status should be "created" (not "running")
-	if resp.Agent.Status != AgentStatusCreated {
-		t.Errorf("expected status '%s', got '%s'", AgentStatusCreated, resp.Agent.Status)
+	if resp.Agent.Status != string(state.PhaseCreated) {
+		t.Errorf("expected status '%s', got '%s'", string(state.PhaseCreated), resp.Agent.Status)
 	}
 
 	// ID and slug should be passed through
@@ -667,7 +668,7 @@ func TestCreateAgentFullStart(t *testing.T) {
 	}
 
 	// Agent status should not be "created" since it was fully started
-	if resp.Agent.Status == AgentStatusCreated {
+	if resp.Agent.Status == string(state.PhaseCreated) {
 		t.Error("expected status to NOT be 'created' for fully started agent")
 	}
 }
@@ -714,8 +715,8 @@ func TestCreateAgentProvisionOnlyWithTask(t *testing.T) {
 		t.Fatal("expected agent to be present")
 	}
 
-	if resp.Agent.Status != AgentStatusCreated {
-		t.Errorf("expected status '%s', got '%s'", AgentStatusCreated, resp.Agent.Status)
+	if resp.Agent.Status != string(state.PhaseCreated) {
+		t.Errorf("expected status '%s', got '%s'", string(state.PhaseCreated), resp.Agent.Status)
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/agent"
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/gcp"
@@ -673,7 +674,8 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			ID:     req.ID,
 			Slug:   req.Slug,
 			Name:   req.Name,
-			Status: AgentStatusCreated,
+			Status: string(state.PhaseCreated),
+		Phase:  string(state.PhaseCreated),
 		}
 		if cfg != nil {
 			agentResp.HarnessConfig = cfg.HarnessConfig

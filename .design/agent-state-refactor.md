@@ -539,11 +539,13 @@ This replaces the previously discussed but unimplemented "stale/stalled detectio
 9. ~~Update notification system to match on activity when available~~
 10. ~~Add `AgentDetail` to API types and `ToAPI()` conversion~~
 
-### Phase 4: Refactor Runtime Broker
+### Phase 4: Refactor Runtime Broker ✅
 
-1. Update `pkg/runtimebroker/types.go` to use canonical types
-2. Update heartbeat payload to report `phase` instead of `status`
-3. Update heartbeat handler to map container status → phase
+1. ~~Update `pkg/runtimebroker/types.go` to use canonical types~~
+2. ~~Update heartbeat payload to report `phase`/`activity` alongside `status`~~
+3. ~~Update hub heartbeat handler to prefer structured `phase`/`activity` fields~~
+4. ~~Update `pkg/agent/list.go` to propagate Phase/Activity from agent-info.json~~
+5. ~~Remove duplicate `AgentStatus*` constants from runtimebroker~~
 
 ### Phase 5: Refactor Web Frontend
 
