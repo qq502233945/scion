@@ -27,56 +27,48 @@ func TestStatusCommand(t *testing.T) {
 		args            []string
 		wantErr         bool
 		wantActivity    string
-		wantStatus      string
 		wantLogContains string
 	}{
 		{
 			name:            "ask_user with message",
 			args:            []string{"status", "ask_user", "What should I do?"},
 			wantActivity:    "waiting_for_input",
-			wantStatus:      "waiting_for_input",
 			wantLogContains: "Agent requested input: What should I do?",
 		},
 		{
 			name:            "ask_user with default message",
 			args:            []string{"status", "ask_user"},
 			wantActivity:    "waiting_for_input",
-			wantStatus:      "waiting_for_input",
 			wantLogContains: "Agent requested input: Input requested",
 		},
 		{
 			name:            "task_completed with message",
 			args:            []string{"status", "task_completed", "Finished the feature"},
 			wantActivity:    "completed",
-			wantStatus:      "completed",
 			wantLogContains: "Agent completed task: Finished the feature",
 		},
 		{
 			name:            "task_completed with default message",
 			args:            []string{"status", "task_completed"},
 			wantActivity:    "completed",
-			wantStatus:      "completed",
 			wantLogContains: "Agent completed task: Task completed",
 		},
 		{
 			name:            "ask_user with multi-word message",
 			args:            []string{"status", "ask_user", "Which", "option", "do", "you", "prefer?"},
 			wantActivity:    "waiting_for_input",
-			wantStatus:      "waiting_for_input",
 			wantLogContains: "Agent requested input: Which option do you prefer?",
 		},
 		{
 			name:            "limits_exceeded with message",
 			args:            []string{"status", "limits_exceeded", "max_turns of 50 exceeded"},
 			wantActivity:    "limits_exceeded",
-			wantStatus:      "limits_exceeded",
 			wantLogContains: "Agent limits exceeded: max_turns of 50 exceeded",
 		},
 		{
 			name:            "limits_exceeded with default message",
 			args:            []string{"status", "limits_exceeded"},
 			wantActivity:    "limits_exceeded",
-			wantStatus:      "limits_exceeded",
 			wantLogContains: "Agent limits exceeded: Agent limits exceeded",
 		},
 	}
@@ -113,8 +105,8 @@ func TestStatusCommand(t *testing.T) {
 				t.Errorf("activity = %q, want %q", got, tt.wantActivity)
 			}
 
-			if got := info["status"]; got != tt.wantStatus {
-				t.Errorf("status = %q, want %q", got, tt.wantStatus)
+			if _, hasStatus := info["status"]; hasStatus {
+				t.Errorf("status field should not exist (legacy field removed), but found %q", info["status"])
 			}
 
 			// Check the log file contains the expected message

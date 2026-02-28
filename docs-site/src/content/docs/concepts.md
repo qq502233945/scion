@@ -51,6 +51,20 @@ A **Runtime Broker** is a compute node (e.g., a server, laptop, or K8s cluster) 
 - It handles workspace synchronization, template hydration, and log streaming.
 - For more details, see the [Runtime Broker Guide](/guides/runtime-broker/).
 
+### Agent State Model
+
+Agent state uses a **layered model** with three dimensions:
+
+- **Phase** — The lifecycle stage of the agent container:
+  `created` → `provisioning` → `cloning` → `starting` → `running` → `stopping` → `stopped` (or `error`)
+
+- **Activity** — What the agent is doing within the `running` phase:
+  `idle`, `thinking`, `executing`, `waiting_for_input`, `completed`, `limits_exceeded`, `offline`
+
+- **Detail** — Freeform context about the current activity (tool name, message, task summary).
+
+This separation allows the UI and API consumers to distinguish between infrastructure lifecycle events (provisioning, stopping) and the agent's cognitive state (thinking, waiting for input). Activities like `completed` and `limits_exceeded` are "sticky" — they persist until the agent is explicitly restarted or stopped.
+
 ## Detailed Architecture
 
 ### A full approach to sub-agents

@@ -555,34 +555,17 @@ This replaces the previously discussed but unimplemented "stale/stalled detectio
 4. ~~Update terminal availability check~~
 5. ~~Update agent detail page, agent list, grove detail, broker detail, terminal, agent-create~~
 
-### Phase 6: Cleanup and Documentation
+### Phase 6: Cleanup and Documentation ✅
 
-1. Remove all duplicate status constant definitions across the codebase
-2. Remove the deprecated flat `status` field from the API (see Backward Compatibility)
-3. Update notification subscriptions to use `triggerActivities`
-4. Update design docs to reference the new model
-5. Update the docs-site with the new state model, API field changes, and migration guidance
+1. ✅ Remove all duplicate status constant definitions across the codebase
+2. ✅ Remove the deprecated flat `status` field from the API and database
+3. ✅ Update notification subscriptions to use `triggerActivities`
+4. ✅ Update design docs to reference the new model
+5. ✅ Update the docs-site with the new state model
 
 ## Backward Compatibility
 
-The `status` field is retained as a computed convenience:
-
-```go
-func (s AgentState) DisplayStatus() string {
-    if s.Phase == PhaseRunning && s.Activity != "" {
-        return string(s.Activity)
-    }
-    return string(s.Phase)
-}
-```
-
-Since the project is still in alpha with few outstanding client installs, the `status` field should be treated as a **short-lived migration aid**, not a permanent fixture. The recommended approach:
-
-- **During implementation (Phases 1–5)**: Retain `status` as a computed field so existing UI and CLI code isn't broken while being migrated.
-- **At cleanup (Phase 6)**: Remove `status` entirely from the API response and database. All consumers should have been updated to use `phase`/`activity` by this point.
-- The `busy` value is retired immediately — consumers see the actual activity (`thinking`, `executing`) instead.
-
-This avoids the technical debt of maintaining a legacy computed field indefinitely.
+The flat `status` field has been fully removed. All consumers now use the layered `phase`/`activity`/`detail` model exclusively. The `DisplayStatus()` helper remains available for cases where a single display string is needed (shows activity when running, phase otherwise).
 
 ## Resolved Design Decisions
 

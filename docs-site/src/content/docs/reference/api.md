@@ -12,17 +12,22 @@ The Scion Hub provides a RESTful API (mostly JSON) for managing the state of the
 ### Authentication
 Most endpoints require a `Bearer` token in the `Authorization` header.
 - **User Tokens**: Obtained via OAuth or Dev Auth.
-- **Agent Tokens**: Issued to agents at startup for status reporting.
+- **Agent Tokens**: Issued to agents at startup for state reporting.
 - **Broker Tokens**: Used for broker-to-hub communication, often combined with HMAC request signing.
 
 ### Core Resources
 
 #### Agents (`/api/v1/agents`)
-- `GET /`: List agents (filterable by grove, user, status).
+- `GET /`: List agents (filterable by grove, user, phase).
 - `POST /`: Dispatch a new agent.
-- `GET /:id`: Get detailed agent status.
+- `GET /:id`: Get detailed agent state (phase, activity, detail).
 - `DELETE /:id`: Stop and remove an agent.
 - `GET /:id/logs`: Stream agent logs (WebSocket).
+
+Agent state uses a layered model:
+- **Phase**: Lifecycle stage (`created`, `provisioning`, `cloning`, `running`, `stopped`, `error`).
+- **Activity**: Runtime activity within the `running` phase (`idle`, `thinking`, `executing`, `waiting_for_input`, `completed`, `limits_exceeded`, `offline`).
+- **Detail**: Freeform context (tool name, message, task summary).
 
 #### Groves (`/api/v1/groves`)
 - `GET /`: List groves you have access to.
@@ -54,8 +59,8 @@ Brokers maintain a persistent outbound WebSocket connection to the Hub. The Hub 
 
 ## Communication Patterns
 
-### Status Reporting
-Agents use the `sciontool` utility to report their state back to the Hub via the `POST /api/v1/agents/:id/status` endpoint. This happens at high frequency during task execution.
+### State Reporting
+Agents use the `sciontool` utility to report their state back to the Hub via the `POST /api/v1/agents/:id/status` endpoint. State updates include the agent's current phase, activity, and contextual detail (e.g., which tool is executing). This happens at high frequency during task execution.
 
 ### Log Streaming
 Logs are collected by the Runtime Broker and can be streamed in two ways:
