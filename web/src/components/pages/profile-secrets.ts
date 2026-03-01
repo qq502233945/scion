@@ -355,7 +355,7 @@ export class ScionPageProfileSecrets extends LitElement {
     this.dialogKey = secret.key;
     this.dialogValue = '';
     this.dialogDescription = secret.description || '';
-    this.dialogType = secret.secretType;
+    this.dialogType = secret.type;
     this.dialogTarget = secret.target || '';
     this.dialogError = null;
     this.dialogOpen = true;
@@ -530,7 +530,7 @@ export class ScionPageProfileSecrets extends LitElement {
           </div>
         </td>
         <td>
-          <span class="type-badge ${secret.secretType}">${secret.secretType}</span>
+          <span class="type-badge ${secret.type}">${secret.type}</span>
         </td>
         <td class="description-cell hide-mobile">${secret.description || '\u2014'}</td>
         <td>
@@ -579,8 +579,8 @@ export class ScionPageProfileSecrets extends LitElement {
       <sl-dialog label=${title} ?open=${this.dialogOpen} @sl-request-close=${this.closeDialog}>
         <form class="dialog-form" @submit=${this.handleSave}>
           <sl-input
-            label="Key"
-            placeholder="e.g. GITHUB_TOKEN"
+            label=${this.dialogType === 'file' ? 'Name' : 'Key'}
+            placeholder=${this.dialogType === 'file' ? 'e.g. ssh_deploy_key' : 'e.g. GITHUB_TOKEN'}
             value=${this.dialogKey}
             ?disabled=${!isCreate}
             @sl-input=${(e: Event) => {

@@ -274,7 +274,7 @@ export type SecretType = 'environment' | 'variable' | 'file';
 export interface Secret {
   id: string;
   key: string;
-  secretType: SecretType;
+  type: SecretType;
   target?: string;
   scope: ResourceScope;
   scopeId: string;
