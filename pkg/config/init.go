@@ -121,11 +121,16 @@ func SeedCommonFiles(templateDir, configDirName string, force bool) error {
 	}{
 		{filepath.Join(homeDir, ".tmux.conf"), readCommonEmbed(".tmux.conf"), 0644},
 		{filepath.Join(homeDir, ".zshrc"), readCommonEmbed("zshrc"), 0644},
+		{filepath.Join(homeDir, ".gemini", ".geminiignore"), readCommonEmbed(".geminiignore"), 0644},
 	}
 
 	for _, f := range files {
 		if f.content == "" {
 			continue
+		}
+		// Ensure parent directory exists (e.g., for .gemini/.geminiignore)
+		if err := os.MkdirAll(filepath.Dir(f.path), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", f.path, err)
 		}
 		if force {
 			if err := os.WriteFile(f.path, []byte(f.content), f.mode); err != nil {
@@ -163,11 +168,16 @@ func SeedCommonFilesToHome(homeDir string, force bool) error {
 	}{
 		{filepath.Join(homeDir, ".tmux.conf"), readCommonEmbed(".tmux.conf"), 0644},
 		{filepath.Join(homeDir, ".zshrc"), readCommonEmbed("zshrc"), 0644},
+		{filepath.Join(homeDir, ".gemini", ".geminiignore"), readCommonEmbed(".geminiignore"), 0644},
 	}
 
 	for _, f := range files {
 		if f.content == "" {
 			continue
+		}
+		// Ensure parent directory exists (e.g., for .gemini/.geminiignore)
+		if err := os.MkdirAll(filepath.Dir(f.path), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", f.path, err)
 		}
 		if force {
 			if err := os.WriteFile(f.path, []byte(f.content), f.mode); err != nil {

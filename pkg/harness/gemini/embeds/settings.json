@@ -9,7 +9,10 @@
     }
   },
   "context": {
-    "fileName": ["CLAUDE.md","AGENTS.md", "GEMINI.md"]
+    "fileName": ["CLAUDE.md","AGENTS.md", "GEMINI.md"],
+    "fileFiltering": {
+      "customIgnoreFilePaths": ["/home/scion/.gemini/.geminiignore"]
+    }
   },
   "model": {
     "skipNextSpeakerCheck": true,
