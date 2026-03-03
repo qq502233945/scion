@@ -157,10 +157,10 @@ agent_instructions: "You are a helpful coding assistant."
 			t.Fatalf("ProvisionAgent failed: %v", err)
 		}
 
-		// Gemini harness writes agent instructions to .gemini/gemini.md
-		data, err := os.ReadFile(filepath.Join(agentHome, ".gemini", "gemini.md"))
+		// Gemini harness writes agent instructions to .gemini/GEMINI.md
+		data, err := os.ReadFile(filepath.Join(agentHome, ".gemini", "GEMINI.md"))
 		if err != nil {
-			t.Fatalf("expected gemini.md to exist: %v", err)
+			t.Fatalf("expected GEMINI.md to exist: %v", err)
 		}
 		if !strings.Contains(string(data), "helpful coding assistant") {
 			t.Errorf("expected agent instructions content, got %q", string(data))
@@ -182,9 +182,9 @@ agent_instructions: my-instructions.md
 			t.Fatalf("ProvisionAgent failed: %v", err)
 		}
 
-		data, err := os.ReadFile(filepath.Join(agentHome, ".gemini", "gemini.md"))
+		data, err := os.ReadFile(filepath.Join(agentHome, ".gemini", "GEMINI.md"))
 		if err != nil {
-			t.Fatalf("expected gemini.md to exist: %v", err)
+			t.Fatalf("expected GEMINI.md to exist: %v", err)
 		}
 		if string(data) != "Instructions from file." {
 			t.Errorf("expected content from file, got %q", string(data))

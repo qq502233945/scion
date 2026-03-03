@@ -478,7 +478,7 @@ func TestWriteTemplate_Gemini(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-pro", cfg.Model)
 
 	// Check instruction file
-	instructionPath := filepath.Join(path, "home", ".gemini", "gemini.md")
+	instructionPath := filepath.Join(path, "home", ".gemini", "GEMINI.md")
 	assert.FileExists(t, instructionPath)
 	content, err := os.ReadFile(instructionPath)
 	require.NoError(t, err)

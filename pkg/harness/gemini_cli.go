@@ -376,9 +376,23 @@ func (g *GeminiCLI) GetHarnessEmbedsFS() (embed.FS, string) {
 }
 
 func (g *GeminiCLI) InjectAgentInstructions(agentHome string, content []byte) error {
-	target := filepath.Join(agentHome, ".gemini", "gemini.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+	dir := filepath.Join(agentHome, ".gemini")
+	target := filepath.Join(dir, "GEMINI.md")
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory for agent instructions: %w", err)
+	}
+	// Remove any existing instruction file with non-canonical casing (e.g.,
+	// "gemini.md" copied from a harness-config home directory). On case-
+	// sensitive filesystems these would coexist with "GEMINI.md" and cause
+	// confusion; on case-insensitive filesystems we still want the directory
+	// entry to use the canonical uppercase name.
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.EqualFold(e.Name(), "GEMINI.md") && e.Name() != "GEMINI.md" {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
+			}
+		}
 	}
 	return os.WriteFile(target, content, 0644)
 }
@@ -409,9 +423,19 @@ func (g *GeminiCLI) RequiredEnvKeys(authSelectedType string) []string {
 }
 
 func (g *GeminiCLI) InjectSystemPrompt(agentHome string, content []byte) error {
-	target := filepath.Join(agentHome, ".gemini", "system_prompt.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+	dir := filepath.Join(agentHome, ".gemini")
+	target := filepath.Join(dir, "system_prompt.md")
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory for system prompt: %w", err)
+	}
+	// Remove any existing system prompt file with non-canonical casing.
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.EqualFold(e.Name(), "system_prompt.md") && e.Name() != "system_prompt.md" {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
+			}
+		}
 	}
 	return os.WriteFile(target, content, 0644)
 }

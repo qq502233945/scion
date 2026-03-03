@@ -17,6 +17,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -149,13 +150,54 @@ func TestGeminiInjectAgentInstructions(t *testing.T) {
 		t.Fatalf("InjectAgentInstructions failed: %v", err)
 	}
 
-	target := filepath.Join(agentHome, ".gemini", "gemini.md")
+	target := filepath.Join(agentHome, ".gemini", "GEMINI.md")
 	data, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("expected file at %s: %v", target, err)
 	}
 	if string(data) != string(content) {
 		t.Errorf("content mismatch: got %q, want %q", string(data), string(content))
+	}
+}
+
+func TestGeminiInjectAgentInstructions_RemovesLowercaseFile(t *testing.T) {
+	agentHome := t.TempDir()
+	g := &GeminiCLI{}
+
+	// Simulate a harness-config home that provides gemini.md (lowercase)
+	geminiDir := filepath.Join(agentHome, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lowercasePath := filepath.Join(geminiDir, "gemini.md")
+	if err := os.WriteFile(lowercasePath, []byte("# Harness config instructions"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject agent instructions — should remove the lowercase file
+	content := []byte("# Template Instructions\nFrom agents.md")
+	if err := g.InjectAgentInstructions(agentHome, content); err != nil {
+		t.Fatalf("InjectAgentInstructions failed: %v", err)
+	}
+
+	// Canonical GEMINI.md should exist with the injected content
+	target := filepath.Join(geminiDir, "GEMINI.md")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("expected GEMINI.md at %s: %v", target, err)
+	}
+	if string(data) != string(content) {
+		t.Errorf("content mismatch: got %q, want %q", string(data), string(content))
+	}
+
+	// Lowercase gemini.md should no longer exist (on case-sensitive filesystems)
+	if _, err := os.Lstat(lowercasePath); err == nil {
+		entries, _ := os.ReadDir(geminiDir)
+		for _, e := range entries {
+			if strings.EqualFold(e.Name(), "GEMINI.md") && e.Name() != "GEMINI.md" {
+				t.Errorf("lowercase %q should have been removed", e.Name())
+			}
+		}
 	}
 }
 
