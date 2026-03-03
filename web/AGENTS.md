@@ -117,6 +117,8 @@ web/
 
 All icons use the Shoelace `<sl-icon>` component, which provides [Bootstrap Icons](https://icons.getbootstrap.com/). Use these consistently when building new UI features.
 
+**Important:** Only icons listed in the `USED_ICONS` array in `scripts/copy-shoelace-icons.mjs` are included in production builds. When you add a new `<sl-icon name="...">` reference, you **must** also add the icon name to that array, then run `npm run copy:shoelace-icons`. Icons will render in dev mode but appear blank in production if this step is missed.
+
 ### Resource Type Icons
 
 | Resource Type | Icon Name | Usage |
