@@ -491,6 +491,46 @@ profiles:
 	}
 }
 
+// TestEnvGather_FileSecretSatisfiesAuth tests that when auth type is unset (auto-detect)
+// and a file-type secret like OAUTH_CREDS is available, the system detects that auth-file
+// can be used and does not require GEMINI_API_KEY.
+func TestEnvGather_FileSecretSatisfiesAuth(t *testing.T) {
+	srv, mgr, groveDir := newTestServerWithHarnessConfig(t, "gemini",
+		"harness: gemini\nimage: test-image\nuser: scion\n",
+		`
+schema_version: "1"
+profiles:
+  default:
+    runtime: mock
+`)
+
+	body := `{
+		"name": "test-agent-oauth",
+		"id": "agent-uuid-oauth",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedSecrets": [
+			{"name": "OAUTH_CREDS", "type": "file", "target": "/home/gemini/.gemini/oauth_creds.json", "value": "{}", "source": "user"}
+		],
+		"config": {"template": "gemini", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// OAUTH_CREDS file secret should satisfy auth via auth-file detection,
+	// so GEMINI_API_KEY should NOT be required.
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 (file secret satisfies auth), got %d: %s", w.Code, w.Body.String())
+	}
+
+	if mgr.lastEnv == nil {
+		t.Fatal("expected env to be set")
+	}
+}
+
 // TestEnvGather_NoGatherFlag tests that env-gather is skipped when GatherEnv is false.
 func TestEnvGather_NoGatherFlag(t *testing.T) {
 	settings := `

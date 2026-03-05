@@ -1292,6 +1292,23 @@ func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) ([]string, map[s
 			}
 		}
 
+		// When auth type is unset (auto-detect), check if resolved file secrets
+		// can satisfy an alternative auth method before defaulting to api-key.
+		// This mirrors the auto-detect priority in each harness's ResolveAuth:
+		// e.g., for gemini, OAuth creds (auth-file) take precedence over requiring
+		// an API key when the OAUTH_CREDS file secret is available.
+		if authType == "" {
+			fileSecretNames := make(map[string]struct{})
+			for _, sec := range req.ResolvedSecrets {
+				if sec.Type == "file" {
+					fileSecretNames[sec.Name] = struct{}{}
+				}
+			}
+			if detected := harness.DetectAuthTypeFromFileSecrets(harnessType, fileSecretNames); detected != "" {
+				authType = detected
+			}
+		}
+
 		// Resolve auth key groups and check satisfaction
 		if keyGroups := harness.RequiredAuthEnvKeys(harnessType, authType); len(keyGroups) > 0 {
 			// Build lookup of already-satisfied keys

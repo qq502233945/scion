@@ -477,6 +477,73 @@ func TestRequiredAuthSecrets(t *testing.T) {
 	}
 }
 
+func TestDetectAuthTypeFromFileSecrets(t *testing.T) {
+	tests := []struct {
+		name       string
+		harness    string
+		secrets    map[string]struct{}
+		wantType   string
+	}{
+		{
+			"gemini with OAUTH_CREDS",
+			"gemini",
+			map[string]struct{}{"OAUTH_CREDS": {}},
+			"auth-file",
+		},
+		{
+			"gemini with GOOGLE_APPLICATION_CREDENTIALS",
+			"gemini",
+			map[string]struct{}{"GOOGLE_APPLICATION_CREDENTIALS": {}},
+			"vertex-ai",
+		},
+		{
+			"gemini with both OAuth and ADC prefers OAuth",
+			"gemini",
+			map[string]struct{}{"OAUTH_CREDS": {}, "GOOGLE_APPLICATION_CREDENTIALS": {}},
+			"auth-file",
+		},
+		{
+			"gemini with no file secrets",
+			"gemini",
+			map[string]struct{}{},
+			"",
+		},
+		{
+			"codex with CODEX_AUTH",
+			"codex",
+			map[string]struct{}{"CODEX_AUTH": {}},
+			"auth-file",
+		},
+		{
+			"opencode with OPENCODE_AUTH",
+			"opencode",
+			map[string]struct{}{"OPENCODE_AUTH": {}},
+			"auth-file",
+		},
+		{
+			"claude with no file secrets",
+			"claude",
+			map[string]struct{}{},
+			"",
+		},
+		{
+			"unknown harness",
+			"unknown",
+			map[string]struct{}{"OAUTH_CREDS": {}},
+			"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectAuthTypeFromFileSecrets(tt.harness, tt.secrets)
+			if got != tt.wantType {
+				t.Errorf("DetectAuthTypeFromFileSecrets(%q, ...) = %q, want %q", tt.harness, got, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestGatherAuthWithEnv_EmptyOverlayValueFallsThrough(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "process-gemini")
 

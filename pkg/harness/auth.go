@@ -224,6 +224,38 @@ func RequiredAuthSecrets(harnessName, authSelectedType string) []api.RequiredSec
 	return nil
 }
 
+// DetectAuthTypeFromFileSecrets checks whether resolved file secrets can
+// satisfy an alternative auth method for the given harness. This mirrors
+// the auto-detect priority in each harness's ResolveAuth: when no auth
+// type is explicitly selected, harnesses try API key first but fall back
+// to file-based auth (OAuth, ADC, etc.) when credentials are available.
+//
+// Returns the effective auth type (e.g., "auth-file", "vertex-ai") if
+// file secrets satisfy it, or "" if no file-based auth is possible.
+// The caller should use the returned type to override the default "api-key"
+// assumption during env-gather, preventing false requirements.
+func DetectAuthTypeFromFileSecrets(harnessName string, fileSecretNames map[string]struct{}) string {
+	switch harnessName {
+	case "gemini":
+		// Auto-detect priority: api-key → OAuth (auth-file) → ADC (vertex-ai)
+		if _, ok := fileSecretNames["OAUTH_CREDS"]; ok {
+			return "auth-file"
+		}
+		if _, ok := fileSecretNames["GOOGLE_APPLICATION_CREDENTIALS"]; ok {
+			return "vertex-ai"
+		}
+	case "codex":
+		if _, ok := fileSecretNames["CODEX_AUTH"]; ok {
+			return "auth-file"
+		}
+	case "opencode":
+		if _, ok := fileSecretNames["OPENCODE_AUTH"]; ok {
+			return "auth-file"
+		}
+	}
+	return ""
+}
+
 // RequiredAuthEnvKeys maps a (harnessName, authSelectedType) pair to the
 // env var key groups required by that combination. Each inner slice is a
 // set of alternatives — any one key satisfying the group is sufficient
