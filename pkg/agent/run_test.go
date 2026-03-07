@@ -2172,6 +2172,34 @@ profiles:
 	}
 }
 
+func TestProfileEnvVisibleInAuthOverlay(t *testing.T) {
+	// Regression: profile env vars must be injected into opts.Env BEFORE
+	// buildAuthEnvOverlay is called. Previously the overlay was built first,
+	// so profile-provided vars like GOOGLE_CLOUD_PROJECT were invisible to
+	// GatherAuthWithEnv, causing auth resolution to fail.
+	optsEnv := map[string]string{"EXISTING": "val"}
+
+	// Simulate profile env injection (what Start does before buildAuthEnvOverlay)
+	profileEnv := map[string]string{
+		"GOOGLE_CLOUD_PROJECT": "my-project",
+		"GOOGLE_CLOUD_REGION":  "us-central1",
+	}
+	for k, v := range profileEnv {
+		if _, exists := optsEnv[k]; !exists {
+			optsEnv[k] = v
+		}
+	}
+
+	overlay := buildAuthEnvOverlay(optsEnv, nil)
+
+	if got := overlay["GOOGLE_CLOUD_PROJECT"]; got != "my-project" {
+		t.Errorf("GOOGLE_CLOUD_PROJECT in auth overlay = %q, want %q", got, "my-project")
+	}
+	if got := overlay["GOOGLE_CLOUD_REGION"]; got != "us-central1" {
+		t.Errorf("GOOGLE_CLOUD_REGION in auth overlay = %q, want %q", got, "us-central1")
+	}
+}
+
 func TestStartInjectsProfileEnvForAuth(t *testing.T) {
 	// When a profile defines env vars like GOOGLE_CLOUD_PROJECT and
 	// GOOGLE_CLOUD_REGION, Start() should inject them into opts.Env so that

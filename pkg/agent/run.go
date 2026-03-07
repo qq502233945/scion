@@ -277,14 +277,11 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	h := harness.New(harnessName)
 
 	// 3. Resolve credentials via new auth pipeline
-	// Build a temporary auth overlay from resolved env-type secrets so auth
-	// resolution can detect credentials without mutating opts.Env (which is
-	// later projected into the container environment).
-	authEnvOverlay := buildAuthEnvOverlay(opts.Env, opts.ResolvedSecrets)
 
-	// Inject profile/harness-config env vars into opts.Env so that
-	// GatherAuthWithEnv can see credentials like GOOGLE_CLOUD_PROJECT
-	// and GOOGLE_CLOUD_REGION declared in the active settings profile.
+	// Inject profile/harness-config env vars into opts.Env BEFORE building the
+	// auth overlay so that GatherAuthWithEnv can see credentials like
+	// GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_REGION declared in the active
+	// settings profile.
 	if settings != nil && !opts.BrokerMode {
 		var settingsEnv map[string]string
 		if harnessConfigName != "" {
@@ -307,6 +304,11 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 			}
 		}
 	}
+
+	// Build a temporary auth overlay from resolved env-type secrets so auth
+	// resolution can detect credentials without mutating opts.Env (which is
+	// later projected into the container environment).
+	authEnvOverlay := buildAuthEnvOverlay(opts.Env, opts.ResolvedSecrets)
 
 	var auth api.AuthConfig
 	var resolvedAuth *api.ResolvedAuth
