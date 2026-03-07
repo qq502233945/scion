@@ -353,7 +353,7 @@ var harnessConfigShowCmd = &cobra.Command{
 				fmt.Printf("ID:           %s\n", hc.ID)
 				fmt.Printf("Harness:      %s\n", hc.Harness)
 				fmt.Printf("Status:       %s\n", hc.Status)
-				fmt.Printf("Content Hash: %s\n", hc.ContentHash)
+				fmt.Printf("Content Hash: %s\n", truncateHash(hc.ContentHash))
 				fmt.Printf("Scope:        %s\n", hc.Scope)
 				fmt.Printf("Files:        %d\n", len(hc.Files))
 				return nil
@@ -520,7 +520,7 @@ func syncHarnessConfigToHub(hubCtx *HubContext, name, localPath, scope, harnessT
 			if len(filesToUpload) == 0 {
 				fmt.Printf("Harness-config '%s' is already up to date.\n", name)
 				fmt.Printf("  ID: %s\n", hcID)
-				fmt.Printf("  Content Hash: %s\n", existing.ContentHash)
+				fmt.Printf("  Content Hash: %s\n", truncateHash(existing.ContentHash))
 				return nil
 			}
 
@@ -643,7 +643,7 @@ func syncHarnessConfigToHub(hubCtx *HubContext, name, localPath, scope, harnessT
 	fmt.Printf("Harness-config '%s' synced successfully!\n", name)
 	fmt.Printf("  ID: %s\n", hc.ID)
 	fmt.Printf("  Status: %s\n", hc.Status)
-	fmt.Printf("  Content Hash: %s\n", hc.ContentHash)
+	fmt.Printf("  Content Hash: %s\n", truncateHash(hc.ContentHash))
 
 	return nil
 }

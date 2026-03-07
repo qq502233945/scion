@@ -989,7 +989,7 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 			if len(filesToUpload) == 0 {
 				fmt.Printf("Template '%s' is already up to date.\n", name)
 				fmt.Printf("  ID: %s\n", templateID)
-				fmt.Printf("  Content Hash: %s\n", existingTemplate.ContentHash)
+				fmt.Printf("  Content Hash: %s\n", truncateHash(existingTemplate.ContentHash))
 				return nil
 			}
 
@@ -1119,7 +1119,7 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 	fmt.Printf("Template '%s' synced successfully!\n", name)
 	fmt.Printf("  ID: %s\n", template.ID)
 	fmt.Printf("  Status: %s\n", template.Status)
-	fmt.Printf("  Content Hash: %s\n", template.ContentHash)
+	fmt.Printf("  Content Hash: %s\n", truncateHash(template.ContentHash))
 
 	return nil
 }
