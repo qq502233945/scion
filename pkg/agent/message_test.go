@@ -55,9 +55,9 @@ func TestMessage(t *testing.T) {
 	}
 
 	expectedCmds := []string{
-		"tmux send-keys -t scion C-c",
-		"tmux send-keys -t scion hello world Enter",
-		"tmux send-keys -t scion Enter",
+		"tmux send-keys -t scion:0 C-c",
+		"tmux send-keys -t scion:0 hello world Enter",
+		"tmux send-keys -t scion:0 Enter",
 	}
 
 	if len(capturedCmd) != len(expectedCmds) {
@@ -113,10 +113,10 @@ func TestBroadcast(t *testing.T) {
 	}
 
 	expectedCalls := []string{
-		"agent-1: tmux send-keys -t scion hello Enter",
-		"agent-1: tmux send-keys -t scion Enter",
-		"agent-2: tmux send-keys -t scion hello Enter",
-		"agent-2: tmux send-keys -t scion Enter",
+		"agent-1: tmux send-keys -t scion:0 hello Enter",
+		"agent-1: tmux send-keys -t scion:0 Enter",
+		"agent-2: tmux send-keys -t scion:0 hello Enter",
+		"agent-2: tmux send-keys -t scion:0 Enter",
 	}
 
 	if len(capturedCalls) != len(expectedCalls) {

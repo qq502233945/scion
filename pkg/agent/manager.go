@@ -144,15 +144,15 @@ func (m *AgentManager) Message(ctx context.Context, agentID string, message stri
 
 	if interrupt {
 		key := h.GetInterruptKey()
-		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", key})
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", key})
 	}
 
 	if message == "" {
 		// Empty messages send a bare Enter keypress to trigger confirmations
-		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", "Enter"})
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	} else {
-		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", message, "Enter"})
-		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", "Enter"})
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", message, "Enter"})
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	}
 
 	// 4. Execute
