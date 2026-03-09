@@ -358,7 +358,8 @@ function renderRoute(path: string): void {
     page.setAttribute('data-scion-page', '');
     shell.appendChild(page);
   } else {
-    // Create the shell for the first time
+    // Create the shell for the first time — clear any SSR-rendered content
+    appContainer.innerHTML = '';
     const shellTag = shellType === 'profile' ? 'scion-profile-shell' : 'scion-app';
     const shell = document.createElement(shellTag) as HTMLElement & {
       currentPath: string;
