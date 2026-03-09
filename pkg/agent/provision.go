@@ -213,6 +213,9 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	agentHome := config.GetAgentHomePath(projectDir, agentName)
 	agentWorkspace := filepath.Join(agentDir, "workspace")
 
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		return "", "", nil, fmt.Errorf("failed to create agent directory: %w", err)
+	}
 	if err := os.MkdirAll(agentHome, 0755); err != nil {
 		return "", "", nil, fmt.Errorf("failed to create agent home: %w", err)
 	}
