@@ -26,3 +26,11 @@ You can use the scion CLI to create and manage other agents as your instructions
   your help
 - **Full CLI Details**: For specific details on all hierarchical commands,
   invoke the CLI directly with `scion --help`
+
+  **4. Messages from System, Users, and Agents**
+  You may be sent messages via the system. These will include markers like
+
+  ---BEGIN SCION MESSAGE---
+  ---END SCION MESSAGE---
+
+  The will contain information about the sender and may be instructions, or a notification about an agent you are interacting with (for example, it completed its task, or needs input)
