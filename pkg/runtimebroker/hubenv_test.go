@@ -149,4 +149,10 @@ func TestRedactEnvValueForLog(t *testing.T) {
 	if got := redactEnvValueForLog("SCION_BROKER_ID", "broker-1"); got != "broker-1" {
 		t.Fatalf("SCION_BROKER_ID should remain visible, got %q", got)
 	}
+	if got := redactEnvValueForLog("SCION_HUB_ENDPOINT", "https://hub.example.com"); got != "https://hub.example.com" {
+		t.Fatalf("SCION_HUB_ENDPOINT should remain visible, got %q", got)
+	}
+	if got := redactEnvValueForLog("SCION_HUB_URL", "https://hub.example.com"); got != "https://hub.example.com" {
+		t.Fatalf("SCION_HUB_URL should remain visible, got %q", got)
+	}
 }
