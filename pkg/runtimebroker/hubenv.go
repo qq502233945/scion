@@ -46,9 +46,13 @@ func resolveHubEndpointForCreate(reqHubEndpoint, brokerHubEndpoint string, resol
 }
 
 func resolveHubEndpointForStart(brokerHubEndpoint string, resolvedEnv map[string]string, grovePath, containerHubEndpoint, runtimeName string) string {
-	hubEndpoint := brokerHubEndpoint
+	// Prefer the Hub-dispatched endpoint from resolved env — the Hub knows
+	// its own public URL and injects it via SCION_HUB_ENDPOINT. The broker's
+	// own HubEndpoint config may be a localhost address (e.g. combo server)
+	// which would incorrectly trigger the container bridge override.
+	hubEndpoint := hubEndpointFromResolvedEnv(resolvedEnv)
 	if hubEndpoint == "" {
-		hubEndpoint = hubEndpointFromResolvedEnv(resolvedEnv)
+		hubEndpoint = brokerHubEndpoint
 	}
 	if hubEndpoint == "" {
 		hubEndpoint = hubEndpointFromGroveSettings(grovePath)

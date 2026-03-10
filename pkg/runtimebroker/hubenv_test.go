@@ -64,16 +64,24 @@ func TestResolveHubEndpointForStartPrecedence(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		broker    string
-		resolved  map[string]string
-		grovePath string
-		want      string
+		name                 string
+		broker               string
+		resolved             map[string]string
+		grovePath            string
+		containerHubEndpoint string
+		want                 string
 	}{
 		{
-			name:      "broker endpoint wins",
+			name:     "resolved env wins over broker",
+			broker:   "https://broker.example.com",
+			resolved: map[string]string{"SCION_HUB_ENDPOINT": "https://resolved.example.com"},
+			grovePath: groveDir,
+			want:      "https://resolved.example.com",
+		},
+		{
+			name:      "broker fallback when resolved env absent",
 			broker:    "https://broker.example.com",
-			resolved:  map[string]string{"SCION_HUB_ENDPOINT": "https://resolved.example.com"},
+			resolved:  map[string]string{"UNRELATED": "x"},
 			grovePath: groveDir,
 			want:      "https://broker.example.com",
 		},
@@ -89,11 +97,18 @@ func TestResolveHubEndpointForStartPrecedence(t *testing.T) {
 			grovePath: groveDir,
 			want:      "https://settings.example.com",
 		},
+		{
+			name:                 "production combo: resolved public URL prevents bridge override over localhost broker",
+			broker:               "http://localhost:8080",
+			resolved:             map[string]string{"SCION_HUB_ENDPOINT": "https://hub.production.example.com"},
+			containerHubEndpoint: "http://host.docker.internal:8080",
+			want:                 "https://hub.production.example.com",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveHubEndpointForStart(tt.broker, tt.resolved, tt.grovePath, "", "docker")
+			got := resolveHubEndpointForStart(tt.broker, tt.resolved, tt.grovePath, tt.containerHubEndpoint, "docker")
 			if got != tt.want {
 				t.Fatalf("resolveHubEndpointForStart() = %q, want %q", got, tt.want)
 			}
