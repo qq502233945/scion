@@ -36,6 +36,11 @@ type EventData struct {
 	ToolInput  string `json:"tool_input,omitempty"`
 	ToolOutput string `json:"tool_output,omitempty"`
 
+	// Token usage fields (populated from model-end / session-end events)
+	InputTokens  int64 `json:"input_tokens,omitempty"`
+	OutputTokens int64 `json:"output_tokens,omitempty"`
+	CachedTokens int64 `json:"cached_tokens,omitempty"`
+
 	// Status fields
 	Success bool   `json:"success,omitempty"`
 	Error   string `json:"error,omitempty"`

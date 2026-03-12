@@ -523,3 +523,128 @@ func TestTelemetryHandler_SessionMetrics(t *testing.T) {
 		t.Error("expected agent.session.count metric to be recorded")
 	}
 }
+
+func TestTelemetryHandler_TokenMetricsOnModelEnd(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+
+	// model-start
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventModelStart,
+		Data: hooks.EventData{},
+	}); err != nil {
+		t.Fatalf("Handle model-start error: %v", err)
+	}
+
+	// model-end with token usage
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventModelEnd,
+		Data: hooks.EventData{
+			Success:      true,
+			InputTokens:  1500,
+			OutputTokens: 500,
+			CachedTokens: 200,
+		},
+	}); err != nil {
+		t.Fatalf("Handle model-end error: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect error: %v", err)
+	}
+
+	found := map[string]bool{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			found[m.Name] = true
+		}
+	}
+
+	if !found["gen_ai.tokens.input"] {
+		t.Error("expected gen_ai.tokens.input metric to be recorded")
+	}
+	if !found["gen_ai.tokens.output"] {
+		t.Error("expected gen_ai.tokens.output metric to be recorded")
+	}
+	if !found["gen_ai.tokens.cached"] {
+		t.Error("expected gen_ai.tokens.cached metric to be recorded")
+	}
+	if !found["gen_ai.api.calls"] {
+		t.Error("expected gen_ai.api.calls metric to be recorded")
+	}
+}
+
+func TestTelemetryHandler_TokenMetricsOnSessionEnd(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+
+	// session-end with cumulative token usage
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventSessionEnd,
+		Data: hooks.EventData{
+			Reason:       "user_exit",
+			InputTokens:  5000,
+			OutputTokens: 2000,
+		},
+	}); err != nil {
+		t.Fatalf("Handle session-end error: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect error: %v", err)
+	}
+
+	found := map[string]bool{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			found[m.Name] = true
+		}
+	}
+
+	if !found["agent.session.count"] {
+		t.Error("expected agent.session.count metric to be recorded")
+	}
+	if !found["gen_ai.tokens.input"] {
+		t.Error("expected gen_ai.tokens.input metric to be recorded on session-end")
+	}
+	if !found["gen_ai.tokens.output"] {
+		t.Error("expected gen_ai.tokens.output metric to be recorded on session-end")
+	}
+}
+
+func TestTelemetryHandler_NoTokenMetricsWhenZero(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+
+	// session-end without token data
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventSessionEnd,
+		Data: hooks.EventData{Reason: "user_exit"},
+	}); err != nil {
+		t.Fatalf("Handle session-end error: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect error: %v", err)
+	}
+
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "gen_ai.tokens.input" || m.Name == "gen_ai.tokens.output" || m.Name == "gen_ai.tokens.cached" {
+				t.Errorf("did not expect %s metric when token counts are zero", m.Name)
+			}
+		}
+	}
+}

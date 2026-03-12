@@ -439,6 +439,17 @@ func (h *TelemetryHandler) eventToEndAttributes(event *hooks.Event, startTime ti
 		attrs = append(attrs, attribute.String("tool_output", val))
 	}
 
+	// Add token usage attributes
+	if event.Data.InputTokens > 0 {
+		attrs = append(attrs, attribute.Int64("gen_ai.usage.input_tokens", event.Data.InputTokens))
+	}
+	if event.Data.OutputTokens > 0 {
+		attrs = append(attrs, attribute.Int64("gen_ai.usage.output_tokens", event.Data.OutputTokens))
+	}
+	if event.Data.CachedTokens > 0 {
+		attrs = append(attrs, attribute.Int64("gen_ai.usage.cached_tokens", event.Data.CachedTokens))
+	}
+
 	return attrs
 }
 
@@ -500,26 +511,46 @@ func (h *TelemetryHandler) recordEndMetrics(event *hooks.Event, startEventType s
 			}
 			h.apiDuration.Record(ctx, durationMs, metric.WithAttributes(attrs...))
 		}
+
+		// Record token usage from model-end events
+		h.recordTokenMetrics(ctx, event, baseAttrs)
 	}
 }
 
-// recordSessionMetrics records session counters on session end.
-// Token usage metrics are populated via the native OTel pipeline from harnesses,
-// not from Gemini session file parsing.
+// recordTokenMetrics records token usage counters from an event's token fields.
+func (h *TelemetryHandler) recordTokenMetrics(ctx context.Context, event *hooks.Event, baseAttrs []attribute.KeyValue) {
+	attrs := baseAttrs
+	if model := os.Getenv("SCION_MODEL"); model != "" {
+		attrs = append(attrs, attribute.String("model", model))
+	}
+
+	if h.tokensInput != nil && event.Data.InputTokens > 0 {
+		h.tokensInput.Add(ctx, event.Data.InputTokens, metric.WithAttributes(attrs...))
+	}
+	if h.tokensOutput != nil && event.Data.OutputTokens > 0 {
+		h.tokensOutput.Add(ctx, event.Data.OutputTokens, metric.WithAttributes(attrs...))
+	}
+	if h.tokensCached != nil && event.Data.CachedTokens > 0 {
+		h.tokensCached.Add(ctx, event.Data.CachedTokens, metric.WithAttributes(attrs...))
+	}
+}
+
+// recordSessionMetrics records session counters and any cumulative token usage on session end.
 func (h *TelemetryHandler) recordSessionMetrics(event *hooks.Event) {
-	if h.sessionCount == nil {
-		return
-	}
-
 	ctx := context.Background()
-	attrs := h.metricAttrs()
+	baseAttrs := h.metricAttrs()
 
-	status := "completed"
-	if event.Data.Error != "" {
-		status = "error"
+	if h.sessionCount != nil {
+		status := "completed"
+		if event.Data.Error != "" {
+			status = "error"
+		}
+		sessionAttrs := append(baseAttrs, attribute.String("status", status))
+		h.sessionCount.Add(ctx, 1, metric.WithAttributes(sessionAttrs...))
 	}
-	attrs = append(attrs, attribute.String("status", status))
-	h.sessionCount.Add(ctx, 1, metric.WithAttributes(attrs...))
+
+	// Record cumulative token usage if reported on session-end
+	h.recordTokenMetrics(ctx, event, baseAttrs)
 }
 
 // Flush ends any in-progress spans. Called during shutdown.

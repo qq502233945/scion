@@ -76,6 +76,9 @@ func (d *GeminiDialect) Parse(data map[string]interface{}) (*hooks.Event, error)
 		}
 	}
 
+	// Extract token usage
+	extractTokens(data, &event.Data)
+
 	return event, nil
 }
 

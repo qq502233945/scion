@@ -79,6 +79,10 @@ func (d *ClaudeDialect) Parse(data map[string]interface{}) (*hooks.Event, error)
 		}
 	}
 
+	// Extract token usage from top-level or nested "usage" object.
+	// Claude Code may report tokens at top level or inside a usage map.
+	extractTokens(data, &event.Data)
+
 	return event, nil
 }
 
@@ -99,6 +103,10 @@ func (d *ClaudeDialect) normalizeEventName(name string) string {
 		return hooks.EventAgentEnd
 	case "Notification":
 		return hooks.EventNotification
+	case "BeforeModel", "ModelRequest":
+		return hooks.EventModelStart
+	case "AfterModel", "ModelResponse":
+		return hooks.EventModelEnd
 	default:
 		return name
 	}

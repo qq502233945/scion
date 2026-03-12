@@ -91,6 +91,13 @@ func TestClaudeDialect_Parse(t *testing.T) {
 			wantName: hooks.EventNotification,
 		},
 		{
+			name: "ModelResponse maps to model-end",
+			input: map[string]interface{}{
+				"hook_event_name": "ModelResponse",
+			},
+			wantName: hooks.EventModelEnd,
+		},
+		{
 			name: "Unknown event preserves name",
 			input: map[string]interface{}{
 				"hook_event_name": "CustomEvent",
@@ -116,4 +123,47 @@ func TestClaudeDialect_Parse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClaudeDialect_ParseTokens(t *testing.T) {
+	d := NewClaudeDialect()
+
+	t.Run("top-level token fields", func(t *testing.T) {
+		event, err := d.Parse(map[string]interface{}{
+			"hook_event_name": "ModelResponse",
+			"input_tokens":    float64(1500),
+			"output_tokens":   float64(500),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1500), event.Data.InputTokens)
+		assert.Equal(t, int64(500), event.Data.OutputTokens)
+	})
+
+	t.Run("nested usage object", func(t *testing.T) {
+		event, err := d.Parse(map[string]interface{}{
+			"hook_event_name": "ModelResponse",
+			"usage": map[string]interface{}{
+				"input_tokens":  float64(2000),
+				"output_tokens": float64(800),
+				"cached_tokens": float64(300),
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(2000), event.Data.InputTokens)
+		assert.Equal(t, int64(800), event.Data.OutputTokens)
+		assert.Equal(t, int64(300), event.Data.CachedTokens)
+	})
+
+	t.Run("cache_read_input_tokens", func(t *testing.T) {
+		event, err := d.Parse(map[string]interface{}{
+			"hook_event_name":          "ModelResponse",
+			"input_tokens":             float64(1000),
+			"output_tokens":            float64(400),
+			"cache_read_input_tokens":  float64(600),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1000), event.Data.InputTokens)
+		assert.Equal(t, int64(400), event.Data.OutputTokens)
+		assert.Equal(t, int64(600), event.Data.CachedTokens)
+	})
 }
