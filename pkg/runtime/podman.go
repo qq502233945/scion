@@ -177,7 +177,13 @@ func (r *PodmanRuntime) Run(ctx context.Context, config RunConfig) (string, erro
 }
 
 func (r *PodmanRuntime) Stop(ctx context.Context, id string) error {
-	_, err := runSimpleCommand(ctx, r.Command, "stop", id)
+	out, err := runSimpleCommand(ctx, r.Command, "stop", id)
+	if err != nil && out != "" {
+		// Include podman's stderr output in the error so callers can match
+		// on messages like "not running" (which runSimpleCommand's error
+		// wrapping would otherwise discard).
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(out))
+	}
 	return err
 }
 

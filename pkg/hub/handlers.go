@@ -1797,14 +1797,19 @@ func (s *Server) handleAgentLifecycle(w http.ResponseWriter, r *http.Request, id
 		if dispatcher != nil && agent.RuntimeBrokerID != "" {
 			// Restart is implemented as stop + start so that env vars
 			// (API keys, secrets) are re-resolved from Hub storage.
-			dispatchErr = dispatcher.DispatchAgentStop(ctx, agent)
-			if dispatchErr == nil {
-				dispatchErr = dispatcher.DispatchAgentStart(ctx, agent, "")
-				// DispatchAgentStart applies the broker response in-place;
-				// use the broker-reported phase if it was set.
-				if dispatchErr == nil && agent.Phase != "" {
-					newPhase = agent.Phase
-				}
+			// Stop errors are tolerated: the container may already be
+			// exited and some runtimes (podman) return non-standard
+			// errors for stopping non-running containers. The subsequent
+			// Start will handle cleanup of the exited container.
+			if stopErr := dispatcher.DispatchAgentStop(ctx, agent); stopErr != nil {
+				slog.Warn("Restart: stop dispatch failed, proceeding with start",
+					"agentID", id, "error", stopErr)
+			}
+			dispatchErr = dispatcher.DispatchAgentStart(ctx, agent, "")
+			// DispatchAgentStart applies the broker response in-place;
+			// use the broker-reported phase if it was set.
+			if dispatchErr == nil && agent.Phase != "" {
+				newPhase = agent.Phase
 			}
 		}
 	}
@@ -1824,8 +1829,8 @@ func (s *Server) handleAgentLifecycle(w http.ResponseWriter, r *http.Request, id
 		statusUpdate.ContainerStatus = "stopped"
 		statusUpdate.Activity = ""
 	}
-	// When starting, propagate container status from broker response
-	if action == "start" && agent.ContainerStatus != "" {
+	// When starting or restarting, propagate container status from broker response
+	if (action == "start" || action == "restart") && agent.ContainerStatus != "" {
 		statusUpdate.ContainerStatus = agent.ContainerStatus
 	}
 	if err := s.store.UpdateAgentStatus(ctx, id, statusUpdate); err != nil {

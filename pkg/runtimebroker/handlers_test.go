@@ -335,6 +335,68 @@ func TestRestartAgent_StartFailure(t *testing.T) {
 	}
 }
 
+func TestRestartAgent_StopFailureTolerated(t *testing.T) {
+	srv := newTestServer()
+	mgr := srv.manager.(*mockManager)
+	// Simulate podman returning an error when stopping an already-exited container
+	mgr.stopErr = fmt.Errorf("podman stop test-agent-1 failed: exit status 125: Error: can only stop running containers: test-agent-1 is not running")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/test-agent-1/restart", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	// Restart should succeed despite the stop error — it's tolerable
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+	if mgr.stopCalls != 1 {
+		t.Fatalf("expected Stop to be called once, got %d", mgr.stopCalls)
+	}
+	if mgr.startCalls != 1 {
+		t.Fatalf("expected Start to be called once, got %d", mgr.startCalls)
+	}
+}
+
+func TestRestartAgent_BrokerModeSet(t *testing.T) {
+	srv := newTestServer()
+	mgr := srv.manager.(*mockManager)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/test-agent-1/restart", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+	if !mgr.lastStartOpts.BrokerMode {
+		t.Fatalf("expected BrokerMode to be true in restart start options")
+	}
+}
+
+func TestIsContainerStopTolerable(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"not found", fmt.Errorf("podman stop foo failed: exit status 1: Error: no container with name or ID \"foo\" found: no such container"), true},
+		{"no such", fmt.Errorf("docker stop foo failed: exit status 1: Error response from daemon: No such container: foo"), true},
+		{"exit status 125", fmt.Errorf("podman stop foo failed: exit status 125"), true},
+		{"not running", fmt.Errorf("podman stop foo failed: exit status 125: Error: can only stop running containers: foo is not running"), true},
+		{"generic failure", fmt.Errorf("podman stop foo failed: exit status 1: unexpected error"), false},
+		{"permission denied", fmt.Errorf("podman stop foo failed: exit status 1: Error: permission denied"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isContainerStopTolerable(tt.err)
+			if result != tt.expected {
+				t.Errorf("isContainerStopTolerable(%q) = %v, want %v", tt.err, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestMethodNotAllowed(t *testing.T) {
 	srv := newTestServer()
 

@@ -1130,6 +1130,21 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
+	// Send an immediate heartbeat so the hub gets the updated container status
+	// without waiting for the next periodic heartbeat interval.
+	s.hubMu.RLock()
+	for _, conn := range s.hubConnections {
+		if conn.Heartbeat != nil {
+			hb := conn.Heartbeat
+			go func() {
+				if err := hb.ForceHeartbeat(context.Background()); err != nil {
+					s.agentLifecycleLog.Error("Failed to send forced heartbeat after start", "agent_id", id, "error", err)
+				}
+			}()
+		}
+	}
+	s.hubMu.RUnlock()
+
 	agentResp := AgentInfoToResponse(*agentInfo)
 	writeJSON(w, http.StatusAccepted, CreateAgentResponse{
 		Agent:   &agentResp,
@@ -1180,17 +1195,29 @@ func (s *Server) applyInlineConfigUpdate(agentName, grovePath string, inlineConf
 	}
 }
 
+// isContainerStopTolerable returns true if the error from stopping a container
+// indicates the container is already stopped, exited, or doesn't exist. This
+// covers both Docker and Podman error messages and exit codes.
+func isContainerStopTolerable(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "no such") ||
+		strings.Contains(msg, "No such") ||
+		strings.Contains(msg, "not running") ||
+		strings.Contains(msg, "is not running") ||
+		strings.Contains(msg, "exit status 125")
+}
+
 func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
 	if err := s.manager.Stop(ctx, id); err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no such") || strings.Contains(errMsg, "No such") || strings.Contains(errMsg, "exit status 125") {
-			// Container doesn't exist or podman/docker can't find it.
+		if isContainerStopTolerable(err) {
+			// Container doesn't exist, is already stopped, or podman/docker can't find it.
 			// Treat as success so the hub can update its state.
-			s.agentLifecycleLog.Warn("Stop target not found in runtime, treating as already stopped", "agent_id", id, "error", err)
+			s.agentLifecycleLog.Warn("Stop target not found or already stopped, treating as success", "agent_id", id, "error", err)
 		} else {
-			RuntimeError(w, "Failed to stop agent: "+errMsg)
+			RuntimeError(w, "Failed to stop agent: "+err.Error())
 			return
 		}
 	}
@@ -1220,7 +1247,10 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
-	opts := api.StartOptions{Name: id}
+	opts := api.StartOptions{
+		Name:       id,
+		BrokerMode: true,
+	}
 	agents, err := s.manager.List(ctx, map[string]string{"scion.agent": "true"})
 	if err == nil {
 		for i := range agents {
@@ -1236,19 +1266,50 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 		opts.Profile = agent.GetSavedProfile(id, opts.GrovePath)
 	}
 
-	// Stop then start — tolerate missing containers since the start will recreate
+	// Enrich with broker-level env vars (hub endpoint, broker name, debug)
+	if opts.Env == nil {
+		opts.Env = make(map[string]string)
+	}
+	runtimeName := ""
+	if s.runtime != nil {
+		runtimeName = s.runtime.Name()
+	}
+	hubEndpoint := resolveHubEndpointForStart(
+		s.config.HubEndpoint,
+		nil,
+		opts.GrovePath,
+		s.config.ContainerHubEndpoint,
+		runtimeName,
+	)
+	if hubEndpoint != "" {
+		opts.Env["SCION_HUB_ENDPOINT"] = hubEndpoint
+		opts.Env["SCION_HUB_URL"] = hubEndpoint
+	}
+	if s.config.BrokerName != "" {
+		opts.Env["SCION_BROKER_NAME"] = s.config.BrokerName
+	}
+	if s.config.BrokerID != "" {
+		opts.Env["SCION_BROKER_ID"] = s.config.BrokerID
+	}
+	if s.config.Debug {
+		opts.Env["SCION_DEBUG"] = "1"
+	}
+
+	// Stop then start — tolerate stop errors since the container may already
+	// be exited and the subsequent start will handle cleanup.
 	if err := s.manager.Stop(ctx, id); err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no such") || strings.Contains(errMsg, "No such") || strings.Contains(errMsg, "exit status 125") {
-			s.agentLifecycleLog.Warn("Restart: stop target not found in runtime, proceeding with start", "agent_id", id, "error", err)
+		if isContainerStopTolerable(err) {
+			s.agentLifecycleLog.Warn("Restart: stop target not found or already stopped, proceeding with start", "agent_id", id, "error", err)
 		} else {
-			RuntimeError(w, "Failed to restart agent: "+errMsg)
-			return
+			// Log but proceed with start — the start will delete and
+			// recreate the container regardless of its current state.
+			s.agentLifecycleLog.Warn("Restart: stop failed, proceeding with start anyway", "agent_id", id, "error", err)
 		}
 	}
 
 	mgr := s.resolveManagerForOpts(opts)
-	if _, err := mgr.Start(ctx, opts); err != nil {
+	agentInfo, err := mgr.Start(ctx, opts)
+	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			NotFound(w, "Agent")
 			return
@@ -1257,9 +1318,24 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]string{
-		"status":  "accepted",
-		"message": "Restart operation accepted",
+	// Send an immediate heartbeat so the hub gets the updated container status
+	s.hubMu.RLock()
+	for _, conn := range s.hubConnections {
+		if conn.Heartbeat != nil {
+			hb := conn.Heartbeat
+			go func() {
+				if err := hb.ForceHeartbeat(context.Background()); err != nil {
+					s.agentLifecycleLog.Error("Failed to send forced heartbeat after restart", "agent_id", id, "error", err)
+				}
+			}()
+		}
+	}
+	s.hubMu.RUnlock()
+
+	agentResp := AgentInfoToResponse(*agentInfo)
+	writeJSON(w, http.StatusAccepted, CreateAgentResponse{
+		Agent:   &agentResp,
+		Created: false,
 	})
 }
 
