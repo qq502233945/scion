@@ -17,18 +17,24 @@
 /**
  * Grove settings page component
  *
- * Displays grove-scoped environment variables, secrets, and danger-zone actions (delete).
+ * Displays grove-scoped templates, environment variables, secrets, and danger-zone actions (delete).
  */
 
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Grove } from '../../shared/types.js';
+import type { PageData, Grove, Template } from '../../shared/types.js';
 import { can, canAny } from '../../shared/types.js';
 import { apiFetch } from '../../client/api.js';
 import '../shared/env-var-list.js';
 import '../shared/secret-list.js';
 import '../shared/shared-dir-list.js';
+
+interface Agent {
+  id: string;
+  phase: string;
+  activity?: string;
+}
 
 @customElement('scion-page-grove-settings')
 export class ScionPageGroveSettings extends LitElement {
@@ -52,6 +58,24 @@ export class ScionPageGroveSettings extends LitElement {
 
   @state()
   private deleteAlsoAgents = false;
+
+  @state()
+  private templates: Template[] = [];
+
+  @state()
+  private templatesLoading = true;
+
+  @state()
+  private syncLoading = false;
+
+  @state()
+  private syncError: string | null = null;
+
+  @state()
+  private syncSuccess: string | null = null;
+
+  private syncAgentId: string | null = null;
+  private syncPollTimer: ReturnType<typeof setInterval> | null = null;
 
   static override styles = css`
     :host {
@@ -110,6 +134,107 @@ export class ScionPageGroveSettings extends LitElement {
       font-size: 0.875rem;
       color: var(--scion-text-muted, #64748b);
       margin: 0 0 1rem 0;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .section-header-text {
+      flex: 1;
+    }
+
+    .template-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .template-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: var(--scion-bg-subtle, #f8fafc);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      border-radius: var(--scion-radius, 0.5rem);
+    }
+
+    .template-item sl-icon {
+      color: var(--scion-primary, #3b82f6);
+      font-size: 1.125rem;
+      flex-shrink: 0;
+    }
+
+    .template-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .template-name {
+      font-weight: 600;
+      font-size: 0.875rem;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .template-meta {
+      font-size: 0.75rem;
+      color: var(--scion-text-muted, #64748b);
+      margin-top: 0.125rem;
+    }
+
+    .template-badge {
+      font-size: 0.6875rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      white-space: nowrap;
+    }
+
+    .empty-templates {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--scion-text-muted, #64748b);
+      font-size: 0.875rem;
+    }
+
+    .empty-templates sl-icon {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      display: block;
+    }
+
+    .sync-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-radius: var(--scion-radius, 0.5rem);
+      font-size: 0.8125rem;
+      margin-bottom: 1rem;
+    }
+
+    .sync-status.error {
+      background: var(--sl-color-danger-50, #fef2f2);
+      color: var(--sl-color-danger-700, #b91c1c);
+      border: 1px solid var(--sl-color-danger-200, #fecaca);
+    }
+
+    .sync-status.success {
+      background: var(--sl-color-success-50, #f0fdf4);
+      color: var(--sl-color-success-700, #15803d);
+      border: 1px solid var(--sl-color-success-200, #bbf7d0);
+    }
+
+    .sync-status.syncing {
+      background: var(--sl-color-primary-50, #eff6ff);
+      color: var(--sl-color-primary-700, #1d4ed8);
+      border: 1px solid var(--sl-color-primary-200, #bfdbfe);
     }
 
     .danger-section {
@@ -228,6 +353,12 @@ export class ScionPageGroveSettings extends LitElement {
       }
     }
     void this.loadGrove();
+    void this.loadTemplates();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.stopSyncPolling();
   }
 
   private async loadGrove(): Promise<void> {
@@ -250,6 +381,104 @@ export class ScionPageGroveSettings extends LitElement {
       this.error = err instanceof Error ? err.message : 'Failed to load grove';
     } finally {
       this.loading = false;
+    }
+  }
+
+  private async loadTemplates(): Promise<void> {
+    this.templatesLoading = true;
+    try {
+      const response = await apiFetch(
+        `/api/v1/templates?scope=grove&groveId=${encodeURIComponent(this.groveId)}&status=active`
+      );
+      if (response.ok) {
+        const data = (await response.json()) as { templates?: Template[] } | Template[];
+        this.templates = Array.isArray(data) ? data : data.templates || [];
+      }
+    } catch (err) {
+      console.error('Failed to load templates:', err);
+    } finally {
+      this.templatesLoading = false;
+    }
+  }
+
+  private async handleSyncTemplates(): Promise<void> {
+    this.syncLoading = true;
+    this.syncError = null;
+    this.syncSuccess = null;
+
+    try {
+      const response = await apiFetch(`/api/v1/groves/${this.groveId}/sync-templates`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errorData.message || `Failed to start template sync: HTTP ${response.status}`);
+      }
+
+      const data = (await response.json()) as { agentId: string; status: string };
+      this.syncAgentId = data.agentId;
+      this.startSyncPolling();
+    } catch (err) {
+      console.error('Failed to sync templates:', err);
+      this.syncError = err instanceof Error ? err.message : 'Failed to sync templates';
+      this.syncLoading = false;
+    }
+  }
+
+  private startSyncPolling(): void {
+    this.stopSyncPolling();
+    this.syncPollTimer = setInterval(() => void this.pollSyncAgent(), 3000);
+  }
+
+  private stopSyncPolling(): void {
+    if (this.syncPollTimer) {
+      clearInterval(this.syncPollTimer);
+      this.syncPollTimer = null;
+    }
+  }
+
+  private async pollSyncAgent(): Promise<void> {
+    if (!this.syncAgentId) return;
+
+    try {
+      const response = await apiFetch(`/api/v1/agents/${this.syncAgentId}`);
+      if (!response.ok) {
+        this.stopSyncPolling();
+        this.syncError = 'Lost track of sync agent';
+        this.syncLoading = false;
+        return;
+      }
+
+      const agent = (await response.json()) as Agent;
+
+      if (agent.phase === 'stopped' || agent.phase === 'completed') {
+        this.stopSyncPolling();
+        this.syncLoading = false;
+        this.syncSuccess = 'Templates synced successfully.';
+        void this.cleanupSyncAgent();
+        void this.loadTemplates();
+      } else if (agent.phase === 'error') {
+        this.stopSyncPolling();
+        this.syncLoading = false;
+        this.syncError = 'Template sync agent encountered an error.';
+        void this.cleanupSyncAgent();
+      }
+    } catch {
+      this.stopSyncPolling();
+      this.syncError = 'Failed to check sync status';
+      this.syncLoading = false;
+    }
+  }
+
+  private async cleanupSyncAgent(): Promise<void> {
+    if (!this.syncAgentId) return;
+    const agentId = this.syncAgentId;
+    this.syncAgentId = null;
+    try {
+      await apiFetch(`/api/v1/agents/${agentId}`, { method: 'DELETE' });
+    } catch {
+      // Best-effort cleanup
     }
   }
 
@@ -306,6 +535,8 @@ export class ScionPageGroveSettings extends LitElement {
         <sl-icon name="gear"></sl-icon>
         <h1>${this.grove.name} Settings</h1>
       </div>
+
+      ${this.renderTemplatesSection()}
 
       ${canAny(this.grove._capabilities, 'update', 'manage') ? html`
         <scion-env-var-list
@@ -371,6 +602,85 @@ export class ScionPageGroveSettings extends LitElement {
           <p>You don't have permission to modify this grove.</p>
         </div>
       `}
+    `;
+  }
+
+  private renderTemplatesSection() {
+    return html`
+      <div class="section">
+        <div class="section-header">
+          <div class="section-header-text">
+            <h2>Templates</h2>
+            <p>Grove-scoped agent templates synced to the Hub.</p>
+          </div>
+          ${canAny(this.grove!._capabilities, 'update', 'manage') ? html`
+            <sl-button
+              size="small"
+              variant="default"
+              ?loading=${this.syncLoading}
+              ?disabled=${this.syncLoading}
+              @click=${() => this.handleSyncTemplates()}
+            >
+              <sl-icon slot="prefix" name="arrow-repeat"></sl-icon>
+              Load Templates
+            </sl-button>
+          ` : ''}
+        </div>
+
+        ${this.syncLoading ? html`
+          <div class="sync-status syncing">
+            <sl-spinner style="font-size: 0.875rem;"></sl-spinner>
+            Syncing templates from grove...
+          </div>
+        ` : ''}
+
+        ${this.syncError ? html`
+          <div class="sync-status error">
+            <sl-icon name="exclamation-triangle"></sl-icon>
+            ${this.syncError}
+          </div>
+        ` : ''}
+
+        ${this.syncSuccess ? html`
+          <div class="sync-status success">
+            <sl-icon name="check-circle"></sl-icon>
+            ${this.syncSuccess}
+          </div>
+        ` : ''}
+
+        ${this.templatesLoading && !this.syncLoading
+          ? html`<div class="empty-templates"><sl-spinner></sl-spinner></div>`
+          : this.templates.length > 0
+            ? html`
+                <div class="template-list">
+                  ${this.templates.map(
+                    (t) => html`
+                      <div class="template-item">
+                        <sl-icon name="file-earmark-code"></sl-icon>
+                        <div class="template-info">
+                          <div class="template-name">${t.displayName || t.name}</div>
+                          ${t.description
+                            ? html`<div class="template-meta">${t.description}</div>`
+                            : ''}
+                        </div>
+                        ${t.harness
+                          ? html`<span class="template-badge">${t.harness}</span>`
+                          : ''}
+                      </div>
+                    `
+                  )}
+                </div>
+              `
+            : html`
+                <div class="empty-templates">
+                  <sl-icon name="file-earmark"></sl-icon>
+                  <p>No grove templates synced yet.</p>
+                  ${canAny(this.grove!._capabilities, 'update', 'manage')
+                    ? html`<p>Use "Load Templates" to sync templates from the grove's filesystem.</p>`
+                    : ''}
+                </div>
+              `}
+      </div>
     `;
   }
 

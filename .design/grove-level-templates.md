@@ -214,13 +214,13 @@ The web UI needs to:
 
 ## 6. Implementation Plan
 
-### Phase 1: CLI Improvements (low effort, high value)
+### Phase 1: CLI Improvements (low effort, high value) — DONE
 - Add `scion templates sync --all` for bulk grove template sync
 - Add `scion templates status` to show sync state between local and Hub
 - Add auto-sync prompt during `scion hub link` (opt-out in interactive, skipped in non-interactive)
 - Add conflict detection with `--force` flag for overwrites
 
-### Phase 2: Web Template Loading (medium effort)
+### Phase 2: Web Template Loading (medium effort) — DONE
 - Implement "Load Templates" button in grove settings page
 - Launch dummy agent using `scion-base` container with generic harness, exec `scion templates sync --all`, then delete the agent
 - Display read-only template list in grove settings

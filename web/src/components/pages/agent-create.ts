@@ -609,6 +609,42 @@ export class ScionPageAgentCreate extends LitElement {
   }
 
   /**
+   * Returns templates visible to the selected grove: grove-scoped templates
+   * for the current grove plus global templates.
+   */
+  private get filteredTemplates(): Template[] {
+    if (!this.groveId) return this.templates;
+    return this.templates.filter(
+      (t) =>
+        t.scope === 'global' ||
+        t.scope === 'user' ||
+        (t.scope === 'grove' && t.scopeId === this.groveId)
+    );
+  }
+
+  /**
+   * Re-select template when grove changes: if current template is not visible
+   * in the new grove, reset to the first available or clear.
+   */
+  private selectTemplateForGrove(): void {
+    const visible = this.filteredTemplates;
+    if (this.templateId && !visible.find((t) => t.id === this.templateId)) {
+      const defaultTemplate = visible.find(
+        (t) => t.slug === 'default' || t.name === 'default'
+      );
+      if (defaultTemplate) {
+        this.templateId = defaultTemplate.id;
+        this.harness = defaultTemplate.harness || 'gemini';
+      } else if (visible.length > 0) {
+        this.templateId = visible[0].id;
+        this.harness = visible[0].harness || 'gemini';
+      } else {
+        this.templateId = '';
+      }
+    }
+  }
+
+  /**
    * Handle broker selection change: reset and auto-select profile.
    */
   private onBrokerChange(): void {
@@ -756,6 +792,7 @@ export class ScionPageAgentCreate extends LitElement {
               @sl-change=${(e: Event) => {
                 this.groveId = (e.target as HTMLElement & { value: string }).value;
                 this.selectBrokerForGrove();
+                this.selectTemplateForGrove();
               }}
               required
             >
@@ -772,10 +809,12 @@ export class ScionPageAgentCreate extends LitElement {
               .value=${this.templateId}
               @sl-change=${(e: Event) => this.onTemplateChange(e)}
             >
-              ${this.templates.map(
+              ${this.filteredTemplates.map(
                 (t) =>
                   html`<sl-option value=${t.id}
-                    >${t.displayName || t.name}${t.description
+                    >${t.displayName || t.name}${t.scope === 'grove'
+                      ? ' (grove)'
+                      : ''}${t.description
                       ? ` - ${t.description}`
                       : ''}</sl-option
                   >`

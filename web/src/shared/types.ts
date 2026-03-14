@@ -399,6 +399,7 @@ export interface Template {
   harness: string;
   status: string;
   scope: string;
+  scopeId?: string;
   createdAt: string;
   updatedAt: string;
   _capabilities?: Capabilities;

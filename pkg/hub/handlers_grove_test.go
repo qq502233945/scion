@@ -795,3 +795,79 @@ func TestResolveRuntimeBroker_HubNativeGrove_NoLocalPath(t *testing.T) {
 		"LocalPath should NOT be set when auto-linking during agent creation for hub-native grove")
 }
 
+// TestGroveSyncTemplates_CreatesAgent verifies that POST /api/v1/groves/{id}/sync-templates
+// creates a template-sync agent with the right configuration.
+func TestGroveSyncTemplates_CreatesAgent(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a broker and grove with the broker as default
+	broker := &store.RuntimeBroker{
+		ID:     "broker-sync-tmpl",
+		Slug:   "sync-tmpl-broker",
+		Name:   "Sync Template Broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	grove := &store.Grove{
+		ID:                    "grove-sync-tmpl",
+		Slug:                  "sync-tmpl-grove",
+		Name:                  "Sync Template Grove",
+		DefaultRuntimeBrokerID: broker.ID,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:  grove.ID,
+		BrokerID: broker.ID,
+		Status:   store.BrokerStatusOnline,
+		LinkedBy: "test",
+	}))
+
+	// Set up a mock dispatcher
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv.SetDispatcher(disp)
+
+	// Call sync-templates
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/"+grove.ID+"/sync-templates", nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp SyncTemplatesResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	assert.NotEmpty(t, resp.AgentID, "should return an agent ID")
+	assert.Equal(t, "syncing", resp.Status)
+
+	// Verify agent was created with correct config
+	agent, err := s.GetAgent(ctx, resp.AgentID)
+	require.NoError(t, err)
+
+	assert.Equal(t, grove.ID, agent.GroveID)
+	assert.Equal(t, broker.ID, agent.RuntimeBrokerID)
+	assert.Equal(t, "template-sync", agent.Labels["scion.dev/purpose"])
+	assert.True(t, agent.Detached)
+	require.NotNil(t, agent.AppliedConfig)
+	assert.Equal(t, "generic", agent.AppliedConfig.HarnessConfig)
+	assert.Equal(t, "scion templates sync --all --force", agent.AppliedConfig.Task)
+}
+
+// TestGroveSyncTemplates_MethodNotAllowed verifies non-POST methods are rejected.
+func TestGroveSyncTemplates_MethodNotAllowed(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-sync-method", Slug: "sync-method", Name: "Method Test"}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/groves/"+grove.ID+"/sync-templates", nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+// TestGroveSyncTemplates_GroveNotFound verifies 404 for non-existent grove.
+func TestGroveSyncTemplates_GroveNotFound(t *testing.T) {
+	srv, _ := testServer(t)
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/nonexistent-grove/sync-templates", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
