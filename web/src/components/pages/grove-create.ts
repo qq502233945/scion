@@ -35,6 +35,9 @@ export class ScionPageGroveCreate extends LitElement {
   @state()
   private error: string | null = null;
 
+  @state()
+  private existingGroveId: string | null = null;
+
   /** Form field values */
   @state()
   private name = '';
@@ -164,6 +167,11 @@ export class ScionPageGroveCreate extends LitElement {
       flex-shrink: 0;
       margin-top: 0.125rem;
     }
+
+    .exists-dialog-body {
+      font-size: 0.925rem;
+      color: var(--scion-text, #1e293b);
+    }
   `;
 
   private slugify(text: string): string {
@@ -223,6 +231,11 @@ export class ScionPageGroveCreate extends LitElement {
     }
   }
 
+  private navigateToGrove(groveId: string): void {
+    window.history.pushState({}, '', `/groves/${groveId}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }
+
   private async handleSubmit(_e: Event): Promise<void> {
     if (!this.name.trim()) {
       this.error = 'Grove name is required.';
@@ -279,9 +292,14 @@ export class ScionPageGroveCreate extends LitElement {
         throw new Error('No grove ID in response');
       }
 
-      // Navigate to grove detail page
-      window.history.pushState({}, '', `/groves/${groveId}`);
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      // Backend returns 200 for an existing grove, 201 for newly created
+      if (response.status === 200) {
+        this.existingGroveId = groveId;
+        return;
+      }
+
+      // Navigate to the newly created grove
+      this.navigateToGrove(groveId);
     } catch (err) {
       console.error('Failed to create grove:', err);
       this.error = err instanceof Error ? err.message : 'Failed to create grove';
@@ -419,6 +437,27 @@ export class ScionPageGroveCreate extends LitElement {
           </div>
         </div>
       </div>
+
+      <sl-dialog
+        label="Grove Already Exists"
+        ?open=${this.existingGroveId !== null}
+        @sl-after-hide=${() => { this.existingGroveId = null; }}
+      >
+        <div class="exists-dialog-body">
+          A grove for this repo already exists.
+        </div>
+        <sl-button
+          slot="footer"
+          variant="primary"
+          @click=${() => {
+            if (this.existingGroveId) {
+              this.navigateToGrove(this.existingGroveId);
+            }
+          }}
+        >
+          Take me there
+        </sl-button>
+      </sl-dialog>
     `;
   }
 }
