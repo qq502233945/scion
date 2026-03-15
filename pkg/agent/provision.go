@@ -965,6 +965,26 @@ func GetAgent(ctx context.Context, agentName string, templateName string, agentI
 
 	util.Debugf("GetAgent: agent dir exists, loading existing config from %s", agentDir)
 
+	// When git clone is configured (hub-dispatched create), clear the workspace
+	// so sciontool performs a fresh clone. The agent directory may be left over
+	// from a previous agent with the same name that was deleted via the hub but
+	// whose local files were not cleaned up. Without this, sciontool sees the
+	// old clone as "already populated" and skips cloning.
+	if gitClone := api.GitCloneFromContext(ctx); gitClone != nil {
+		if info, err := os.Stat(agentWorkspace); err == nil && info.IsDir() {
+			if !isWorkspaceEmptyDir(agentWorkspace) {
+				util.Debugf("GetAgent: clearing existing workspace for git-clone re-provision: %s", agentWorkspace)
+				_ = util.MakeWritableRecursive(agentWorkspace)
+				if err := os.RemoveAll(agentWorkspace); err != nil {
+					util.Debugf("GetAgent: failed to clear workspace: %v", err)
+				}
+				if err := os.MkdirAll(agentWorkspace, 0755); err != nil {
+					util.Debugf("GetAgent: failed to recreate workspace: %v", err)
+				}
+			}
+		}
+	}
+
 	// Try to load agent-info.json first to get the template
 	agentInfoPath := filepath.Join(agentHome, "agent-info.json")
 	var agentInfo *api.AgentInfo
@@ -1014,5 +1034,14 @@ func GetAgent(ctx context.Context, agentName string, templateName string, agentI
 		finalCfg.Harness, finalCfg.HarnessConfig, finalCfg.Image, finalCfg.DefaultHarnessConfig)
 
 	return agentDir, agentHome, agentWorkspace, finalCfg, nil
+}
+
+// isWorkspaceEmptyDir returns true if the directory is empty or does not exist.
+func isWorkspaceEmptyDir(path string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return true
+	}
+	return len(entries) == 0
 }
 

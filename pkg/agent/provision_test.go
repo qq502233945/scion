@@ -1056,3 +1056,72 @@ func TestProvisionAgentGitClone_PreservesExistingClone(t *testing.T) {
 		t.Errorf("expected .git directory to be preserved: %v", err)
 	}
 }
+
+// TestGetAgentGitClone_ClearsExistingWorkspace verifies that when GetAgent
+// finds an existing agent directory (with config file) and git clone mode is
+// active, the workspace is cleared so sciontool can perform a fresh clone.
+// This covers the scenario where a hub-deleted agent's local directory remains
+// and a new agent with the same name is created via hub dispatch.
+func TestGetAgentGitClone_ClearsExistingWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+	os.MkdirAll(filepath.Join(globalScionDir, "templates"), 0755)
+	seedTestHarnessConfig(t, globalScionDir, "gemini", "gemini")
+	tplDir := filepath.Join(globalScionDir, "templates", "gemini")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config":"gemini"}`), 0644)
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	// Create a fully provisioned agent directory with config file and
+	// a populated workspace — simulating a leftover from a previous agent.
+	agentDir := filepath.Join(projectScionDir, "agents", "reused-agent")
+	agentWorkspace := filepath.Join(agentDir, "workspace")
+	agentHome := filepath.Join(agentDir, "home")
+	os.MkdirAll(agentWorkspace, 0755)
+	os.MkdirAll(agentHome, 0755)
+	// Write a config file so GetAgent treats this as an existing agent.
+	os.WriteFile(filepath.Join(agentDir, "scion-agent.json"),
+		[]byte(`{"harness":"gemini","default_harness_config":"gemini"}`), 0644)
+	// Populate workspace with stale clone content.
+	os.WriteFile(filepath.Join(agentWorkspace, ".git"),
+		[]byte("gitdir: ../../../.git/worktrees/reused-agent\n"), 0644)
+	os.WriteFile(filepath.Join(agentWorkspace, "main.go"),
+		[]byte("package main\n"), 0644)
+
+	gitClone := &api.GitCloneConfig{
+		URL:    "https://github.com/example/repo.git",
+		Branch: "main",
+		Depth:  1,
+	}
+	ctx := api.ContextWithGitClone(context.Background(), gitClone)
+
+	_, _, wsPath, _, err := GetAgent(ctx, "reused-agent", "gemini", "", "", projectScionDir, "", "", "", "")
+	if err != nil {
+		t.Fatalf("GetAgent failed: %v", err)
+	}
+
+	// The workspace should now be empty — ready for sciontool to clone into.
+	entries, err := os.ReadDir(wsPath)
+	if err != nil {
+		t.Fatalf("workspace dir should exist: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Errorf("expected empty workspace after clearing stale content, got: %v", names)
+	}
+}
