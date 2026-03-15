@@ -97,22 +97,27 @@ func TestKubernetesRuntime_Run_Tmux(t *testing.T) {
 
 	// Assertions
 	// Check Command
-	// Expected: tmux new-session -s scion "/bin/echo hello"
-	// Note: quoting might vary depending on implementation, but we expect tmux to be the entrypoint
+	// Expected: sh -c "tmux new-session -d -s scion -n agent ... \; new-window ... \; select-window ... \; attach-session ..."
 	if len(pod.Spec.Containers) == 0 {
 		t.Fatal("Pod has no containers")
 	}
 	cmd := pod.Spec.Containers[0].Command
-	if len(cmd) < 4 {
+	if len(cmd) < 3 {
 		t.Fatalf("Command too short: %v", cmd)
 	}
-	if cmd[0] != "tmux" || cmd[1] != "new-session" {
-		t.Errorf("Expected command to start with tmux new-session, got %v", cmd)
+	if cmd[0] != "sh" || cmd[1] != "-c" {
+		t.Errorf("Expected command to start with sh -c, got %v", cmd)
 	}
-	// Check if the wrapped command contains our harness command
-	joinedCmd := cmd[len(cmd)-1]
-	if !strings.Contains(joinedCmd, "/bin/echo") || !strings.Contains(joinedCmd, "hello") {
-		t.Errorf("Wrapped command does not contain harness command. Got: %s", joinedCmd)
+	// Check if the wrapped command contains tmux session setup and harness command
+	tmuxCmd := cmd[2]
+	if !strings.Contains(tmuxCmd, "tmux new-session -d -s scion -n agent") {
+		t.Errorf("Expected tmux new-session with agent window, got: %s", tmuxCmd)
+	}
+	if !strings.Contains(tmuxCmd, "new-window -t scion -n shell") {
+		t.Errorf("Expected shell window creation, got: %s", tmuxCmd)
+	}
+	if !strings.Contains(tmuxCmd, "/bin/echo") || !strings.Contains(tmuxCmd, "hello") {
+		t.Errorf("Wrapped command does not contain harness command. Got: %s", tmuxCmd)
 	}
 
 	// Update Pod to Running to let Run finish

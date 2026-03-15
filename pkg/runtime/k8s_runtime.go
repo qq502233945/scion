@@ -693,7 +693,12 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) (*corev
 		}
 	}
 	cmdLine := strings.Join(quotedArgs, " ")
-	cmd = []string{"tmux", "new-session", "-s", "scion", cmdLine}
+	// Create session with "agent" window running the harness, plus a "shell" window.
+	tmuxCmd := fmt.Sprintf(
+		"tmux new-session -d -s scion -n agent %s \\; new-window -t scion -n shell \\; select-window -t scion:agent \\; attach-session -t scion",
+		cmdLine,
+	)
+	cmd = []string{"sh", "-c", tmuxCmd}
 
 	// Env Resolution — match local runtimes by including harness env + telemetry env.
 	envVars := []corev1.EnvVar{}

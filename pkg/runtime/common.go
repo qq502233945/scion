@@ -331,18 +331,19 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	}
 	cmdLine := strings.Join(quotedArgs, " ")
 
-	if len(fuseMounts) > 0 {
-		finalCmd := []string{"tmux", "new-session", "-s", "scion", cmdLine}
+	// Build tmux command: create session with "agent" window running the harness,
+	// then add a "shell" window and switch back to the agent window.
+	tmuxCmd := fmt.Sprintf(
+		"tmux new-session -d -s scion -n agent %s \\; new-window -t scion -n shell \\; select-window -t scion:agent \\; attach-session -t scion",
+		cmdLine,
+	)
 
+	if len(fuseMounts) > 0 {
 		mountCmds := strings.Join(fuseMounts, " && ")
-		var quotedFinal []string
-		for _, a := range finalCmd {
-			quotedFinal = append(quotedFinal, fmt.Sprintf("%q", a))
-		}
-		wrapped := fmt.Sprintf("%s && exec %s", mountCmds, strings.Join(quotedFinal, " "))
+		wrapped := fmt.Sprintf("%s && exec sh -c %q", mountCmds, tmuxCmd)
 		args = append(args, "sh", "-c", wrapped)
 	} else {
-		args = append(args, "tmux", "new-session", "-s", "scion", cmdLine)
+		args = append(args, "sh", "-c", tmuxCmd)
 	}
 
 	return args, nil

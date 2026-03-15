@@ -55,7 +55,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Image:        "scion-agent:latest",
 				Task:         "hello",
 			},
-			wantIn: []string{"run", "-d", "-i", "--name", "test-agent", "scion-agent:latest", "tmux", "new-session", "-s", "scion"},
+			wantIn: []string{"run", "-d", "-i", "--name", "test-agent", "scion-agent:latest", "sh", "-c", "tmux new-session -d -s scion -n agent"},
 		},
 		{
 			name: "workspace and home",
@@ -104,7 +104,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			},
 			wantIn: []string{
 				"--label", "foo=bar",
-				"tmux", "new-session", "-s", "scion",
+				"tmux new-session -d -s scion -n agent",
 			},
 		},
 		{
@@ -185,7 +185,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			},
 			wantIn: []string{
 				"-e FOO=BAR",
-				"tmux new-session -s scion gemini --yolo --resume --prompt-interactive hello",
+				"tmux new-session -d -s scion -n agent gemini --yolo --resume --prompt-interactive hello",
 			},
 		},
 		{
@@ -198,7 +198,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Resume:  true,
 			},
 			wantIn: []string{
-				"tmux new-session -s scion gemini --yolo --resume --prompt-interactive hello",
+				"tmux new-session -d -s scion -n agent gemini --yolo --resume --prompt-interactive hello",
 			},
 		},
 		{
