@@ -777,7 +777,9 @@ func gitCloneWorkspace(uid, gid int) error {
 
 	workspacePath := "/workspace"
 
-	// Check if workspace already has content (stop/start scenario)
+	// Check if workspace already has content (stop/start scenario).
+	// Ignore marker-only directories (e.g. .scion/) that may have been
+	// written during provisioning — they don't indicate a real clone.
 	if !isWorkspaceEmpty(workspacePath) {
 		log.Info("Workspace already populated, skipping git clone")
 		return nil
@@ -1024,11 +1026,25 @@ func isClaude(childArgs []string) bool {
 	return false
 }
 
-// isWorkspaceEmpty returns true if the directory doesn't exist or contains no entries.
+// isWorkspaceEmpty returns true if the directory doesn't exist or contains
+// only provisioning marker entries (e.g. .scion/). A workspace with only
+// marker directories is considered empty for git-clone purposes so that
+// sciontool proceeds with cloning rather than skipping it.
 func isWorkspaceEmpty(path string) bool {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return true
 	}
-	return len(entries) == 0
+	// Filter out known marker entries that don't indicate a real workspace
+	for _, e := range entries {
+		switch e.Name() {
+		case ".scion":
+			// Provisioning marker directory — ignore
+			continue
+		default:
+			log.Debug("Workspace not empty: found %q in %s", e.Name(), path)
+			return false
+		}
+	}
+	return true
 }

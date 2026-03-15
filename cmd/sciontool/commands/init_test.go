@@ -199,6 +199,23 @@ func TestIsWorkspaceEmpty(t *testing.T) {
 			t.Error("expected false for directory with files")
 		}
 	})
+
+	t.Run("directory with only .scion marker", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.MkdirAll(filepath.Join(tmpDir, ".scion"), 0755)
+		if !isWorkspaceEmpty(tmpDir) {
+			t.Error("expected true when workspace contains only .scion marker")
+		}
+	})
+
+	t.Run("directory with .scion marker and real content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.MkdirAll(filepath.Join(tmpDir, ".scion"), 0755)
+		os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("content"), 0644)
+		if isWorkspaceEmpty(tmpDir) {
+			t.Error("expected false when workspace has .scion and real files")
+		}
+	})
 }
 
 func TestSanitizeGitOutput(t *testing.T) {
