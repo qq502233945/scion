@@ -1,10 +1,10 @@
 # GCP Identity for Agents via Metadata Server Emulation
 
-## Status: Draft (Research & Design)
+## Status: Approved
 
 ## Problem Statement
 
-Scion agents running in containers frequently need to interact with Google Cloud APIs (GCS, BigQuery, Vertex AI, Cloud Build, etc.). Today, credentials are injected via environment variables or mounted credential files. This works for the LLM harness itself (e.g., `GOOGLE_APPLICATION_CREDENTIALS` for Vertex AI auth), but does not provide a general-purpose GCP identity to the agent's code execution environment. An agent writing a Cloud Function, querying BigQuery, or deploying infrastructure has no transparent way to authenticate.
+Scion agents running in containers may need to interact with Google Cloud APIs (GCS, BigQuery, Vertex AI, Cloud Build, etc.). Today, credentials are injected via environment variables or mounted credential files. This works for the LLM harness itself (e.g., `GOOGLE_APPLICATION_CREDENTIALS` for Vertex AI auth), but does not provide a general-purpose GCP identity to the agent's code execution environment. An agent writing a Cloud Function, querying BigQuery, or deploying infrastructure has no transparent way to authenticate.
 
 We want agents to have seamless, transparent GCP identity so that any code using standard GCP client libraries (Go, Python, Node.js, Java) works without explicit credential management.
 
@@ -38,6 +38,12 @@ Agent Container                    Broker (sciontool)              Scion Hub    
 └─────────────────┘               └──────────────────┘           └──────────────┘           └─────────┘
 ```
 
+### Metadata Interception Strategy
+
+The primary mechanism uses the `GCE_METADATA_HOST` environment variable, which is supported by all major GCP client libraries (Go, Python, Java, Node.js). Setting `GCE_METADATA_HOST=localhost:18380` causes all metadata requests to go to `http://localhost:18380` instead of `169.254.169.254`.
+
+For the Docker runtime, iptables rules will also be configured to redirect traffic destined for `169.254.169.254` to the local sidecar. This ensures that tools which hardcode the metadata IP (e.g., `curl`) are also intercepted, which is important for `block` mode security — without iptables, an agent could use `curl` to bypass the block and reach the host's real metadata server. The env var approach remains the fallback for runtimes where iptables configuration is difficult or impossible.
+
 ## Prior Art & Reference
 
 ### GCE Metadata Server
@@ -65,8 +71,6 @@ GCP client libraries implement ADC with this precedence:
 3. Attached service account via metadata server
 4. (Workload Identity Federation, etc.)
 
-The metadata server check can be redirected via the `GCE_METADATA_HOST` environment variable (supported by Go, Python, Java, Node.js client libraries). Setting `GCE_METADATA_HOST=localhost:8080` causes all metadata requests to go to `http://localhost:8080` instead of `169.254.169.254`.
-
 ### salrashid123/gce_metadata_server
 
 [This project](https://github.com/salrashid123/gce_metadata_server) provides a Go implementation of a metadata server emulator that can:
@@ -81,23 +85,24 @@ This is a useful reference, though our implementation differs significantly beca
 
 ### 1. Service Account Registration (Hub Resource)
 
-Service accounts are a new grove-level resource type. They represent a GCP service account that can be assigned to agents in that grove.
+Service accounts are a new resource type. They can be scoped at the hub, grove, or user level, consistent with how secrets are scoped.
 
 **Why a new resource type (not a secret)?**
 
-A service account assignment is not a secret — it is a *mapping* of a GCP service account email to a grove, with associated metadata. No key material is stored. The Hub's own GCP identity is used to impersonate the service account at token-generation time.
+A service account assignment is not a secret — it is a *mapping* of a GCP service account email to a scope, with associated metadata. No key material is stored. The Hub's own GCP identity is used to impersonate the service account at token-generation time.
 
 #### Data Model
 
 ```go
-// GCPServiceAccount represents a GCP service account registered to a grove.
+// GCPServiceAccount represents a GCP service account registered for use by agents.
 type GCPServiceAccount struct {
     ID               string    `json:"id"`                // UUID
-    GroveID          string    `json:"grove_id"`          // FK to Grove
+    Scope            string    `json:"scope"`             // "hub", "grove", "user"
+    ScopeID          string    `json:"scope_id"`          // ID of the hub/grove/user
     Email            string    `json:"email"`             // e.g. "agent-worker@project.iam.gserviceaccount.com"
     ProjectID        string    `json:"project_id"`        // GCP project containing the SA
     DisplayName      string    `json:"display_name"`      // Human-friendly label
-    Scopes           []string  `json:"scopes,omitempty"`  // OAuth scopes (default: cloud-platform)
+    DefaultScopes    []string  `json:"default_scopes,omitempty"` // OAuth scopes (default: cloud-platform)
     Verified         bool      `json:"verified"`          // Hub confirmed it can impersonate this SA
     VerifiedAt       time.Time `json:"verified_at,omitempty"`
     CreatedBy        string    `json:"created_by"`        // User who registered it
@@ -132,9 +137,9 @@ If successful, the SA is marked `Verified=true`. This confirms the Hub's own ser
 
 #### Authorization Requirements
 
-- **Registering a service account**: Requires `manage` action on the grove (grove owner/admin).
-- **Assigning a service account to an agent**: Requires `create` action on agents in the grove (standard agent creation permission).
-- **Using tokens at runtime**: The agent's JWT scopes must include a new scope `grove:gcp:token` (granted automatically when GCP identity is assigned).
+- **Registering a service account**: Requires grove admin role (or equivalent at the scoped level).
+- **Assigning a service account to an agent**: Requires `assign` permission on the specific service account resource, in addition to agent creation permission. This prevents an agent creator from assigning arbitrary service accounts they don't have permission to use.
+- **Using tokens at runtime**: The agent's JWT must include a scope `grove:gcp:token:<service-account-id>` identifying the specific service account (see Section 5).
 
 ### 2. Agent GCP Identity Assignment
 
@@ -157,11 +162,24 @@ The `metadata_mode` field on agent creation controls how the metadata server beh
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `block` | Metadata sidecar returns 403 for all token requests. Other metadata (project-id, zone) still served. | Prevent agents from inheriting broker/host GCP identity. Security-hardened agents. |
+| `block` | Metadata sidecar returns 403 for all token and identity-token requests. Other metadata (project-id, zone) still served. All unmodified metadata items are passed through. | Prevent agents from inheriting broker/host GCP identity. Security-hardened agents. |
 | `passthrough` | No metadata sidecar started. Metadata requests reach the real metadata server (if running on GCE) or fail naturally. | Local development, agents on GCE that should use the VM's identity. |
-| `assign` | Metadata sidecar serves tokens for the assigned service account via Hub brokering. | Production agents needing GCP API access. |
+| `assign` | Metadata sidecar serves access tokens and identity tokens for the assigned service account via Hub brokering. All other metadata items not explicitly handled are passed through unchanged. | Production agents needing GCP API access. |
 
-**Default**: `block` — prevents accidental credential leakage from the broker's compute environment.
+**Default**: `block` in hosted mode. In local/solo mode, metadata interception is disabled (equivalent to `passthrough`).
+
+#### Modified vs. Pass-Through Metadata Items
+
+The metadata sidecar explicitly handles the following endpoints:
+
+| Endpoint Category | `assign` mode | `block` mode |
+|---|---|---|
+| `/instance/service-accounts/*/token` | Served via Hub brokering | 403 Forbidden |
+| `/instance/service-accounts/*/identity` | Served via Hub brokering | 403 Forbidden |
+| `/instance/service-accounts/*/email` | Returns assigned SA email | 403 Forbidden |
+| `/instance/service-accounts/*/scopes` | Returns configured scopes | 403 Forbidden |
+| `/instance/service-accounts/` (list) | Returns assigned SA listing | 403 Forbidden |
+| All other metadata items | Passed through unchanged | Passed through unchanged |
 
 #### Agent Model Extension
 
@@ -177,35 +195,22 @@ type GCPIdentityConfig struct {
 
 ### 3. Metadata Server Sidecar (sciontool)
 
-The metadata emulator runs as a sidecar service managed by sciontool's existing `ServiceManager`. It is not a separate binary — it is a built-in HTTP server within sciontool itself, started via a new subcommand.
+The metadata emulator runs as part of the already-running sciontool process inside the agent container. Rather than launching a separate process, the metadata server is started as a goroutine within sciontool, gated by environment variables that configure its mode and service account details. This avoids the overhead of managing an additional process.
 
-#### Sciontool Command
+#### Configuration (Environment Variables)
 
-```bash
-sciontool metadata-server \
-  --mode=assign \
-  --port=18380 \
-  --service-account-email=agent-worker@project.iam.gserviceaccount.com \
-  --project-id=my-project
+When `metadata_mode` is `block` or `assign`, the provisioning pipeline sets the following environment variables for sciontool:
+
+```
+SCION_METADATA_MODE=assign
+SCION_METADATA_PORT=18380
+SCION_METADATA_SA_EMAIL=agent-worker@project.iam.gserviceaccount.com
+SCION_METADATA_PROJECT_ID=my-project
 ```
 
-#### Service Spec (injected during provisioning)
+On startup, sciontool checks for `SCION_METADATA_MODE`. If set to `assign` or `block`, it starts the metadata HTTP server on the configured port as part of its normal initialization.
 
-When `metadata_mode` is `block` or `assign`, the provisioning pipeline injects a service spec into `scion-services.yaml`:
-
-```yaml
-- name: gcp-metadata
-  command: ["sciontool", "metadata-server", "--mode=assign", "--port=18380",
-            "--service-account-email=agent-worker@project.iam.gserviceaccount.com",
-            "--project-id=my-project"]
-  restart: always
-  ready_check:
-    type: http
-    target: "http://localhost:18380/computeMetadata/v1/"
-    timeout: "5s"
-```
-
-#### Environment Variable Injection
+#### Environment Variable Injection (Agent Container)
 
 The provisioning pipeline also sets:
 
@@ -229,10 +234,12 @@ This redirects all GCP client library metadata lookups to the sidecar.
 | `GET /computeMetadata/v1/instance/service-accounts/default/email` | SA email |
 | `GET /computeMetadata/v1/instance/service-accounts/default/token` | Access token JSON |
 | `GET /computeMetadata/v1/instance/service-accounts/default/scopes` | Scope list |
+| `GET /computeMetadata/v1/instance/service-accounts/default/identity` | OIDC identity token |
 | `GET /computeMetadata/v1/instance/service-accounts/{email}/token` | Access token JSON |
 | `GET /computeMetadata/v1/instance/service-accounts/{email}/email` | SA email |
+| `GET /computeMetadata/v1/instance/service-accounts/{email}/identity` | OIDC identity token |
 
-**Token response format** (matches GCE exactly):
+**Access token response format** (matches GCE exactly):
 
 ```json
 {
@@ -241,6 +248,10 @@ This redirects all GCP client library metadata lookups to the sidecar.
   "token_type": "Bearer"
 }
 ```
+
+**Identity token response format:**
+
+The `/identity` endpoint accepts an `audience` query parameter and returns a raw JWT string (matching GCE behavior).
 
 **Header validation:**
 - All requests must include `Metadata-Flavor: Google` header.
@@ -256,41 +267,44 @@ This redirects all GCP client library metadata lookups to the sidecar.
    b. Otherwise → request fresh token from Hub
 4. Sidecar calls Hub: POST /api/v1/agent/gcp-token
    - Authorization: Bearer <SCION_AUTH_TOKEN>
-   - Body: {"service_account_email": "...", "scopes": ["https://www.googleapis.com/auth/cloud-platform"]}
-5. Hub validates agent JWT, checks scope grove:gcp:token
-6. Hub verifies the requested SA is assigned to this agent's grove
+   - Body: {"scopes": ["https://www.googleapis.com/auth/cloud-platform"]}
+5. Hub validates agent JWT, checks scope grove:gcp:token:<sa-id>
+6. Hub resolves the service account from the agent's GCP identity assignment
 7. Hub calls GCP IAM Credentials API (generateAccessToken) using its own identity
 8. Hub returns token to sidecar
 9. Sidecar caches token and returns to client
 ```
 
-#### Token Caching
+#### Token Caching & Proactive Refresh
 
 The sidecar caches tokens locally to minimize Hub round-trips:
 
-- Cache key: service account email + scopes
-- Eviction: when `expires_in` drops below 60 seconds (refresh window)
-- On cache miss or expiry: synchronous request to Hub
+- Cache key: service account email + scopes (or audience for identity tokens)
+- The first token request triggers a synchronous fetch from the Hub
+- Once a token is cached, a background goroutine (using a Go timer) proactively refreshes it before expiry — when `expires_in` drops below 300 seconds, the sidecar pre-emptively fetches a new token from the Hub
+- This ensures subsequent agent requests receive cached tokens with near-zero latency, avoiding synchronous Hub round-trips during active use
 - Concurrent requests for the same token coalesce (singleflight pattern)
 
 #### Block Mode Behavior
 
 In `block` mode, the sidecar:
 - Returns `403` for all `/token` and `/identity` endpoints
-- Still serves project metadata (project-id) if configured
+- Returns `403` for `/email`, `/scopes`, and service account listing endpoints
+- Passes through all other metadata items (project-id, zone, etc.) unchanged
 - Logs blocked requests for observability
 
 ### 4. Hub Token Brokering Endpoint
 
-#### New Hub Endpoint
+#### New Hub Endpoints
 
 ```
 POST /api/v1/agent/gcp-token
+POST /api/v1/agent/gcp-identity-token
 ```
 
-**Authentication**: Agent JWT (Bearer token with `grove:gcp:token` scope)
+**Authentication**: Agent JWT (Bearer token with `grove:gcp:token:<sa-id>` scope)
 
-**Request:**
+**Access Token Request (`/gcp-token`):**
 ```json
 {
   "scopes": ["https://www.googleapis.com/auth/cloud-platform"]
@@ -299,7 +313,14 @@ POST /api/v1/agent/gcp-token
 
 Note: The service account email is **not** in the request body. The Hub resolves it from the agent's GCP identity assignment. This prevents an agent from requesting tokens for arbitrary service accounts.
 
-**Response (200):**
+**Identity Token Request (`/gcp-identity-token`):**
+```json
+{
+  "audience": "https://my-cloud-run-service.run.app"
+}
+```
+
+**Response (200) — Access Token:**
 ```json
 {
   "access_token": "ya29.c.ElpSB...",
@@ -308,9 +329,16 @@ Note: The service account email is **not** in the request body. The Hub resolves
 }
 ```
 
+**Response (200) — Identity Token:**
+```json
+{
+  "token": "eyJhbGciOiJSUzI1NiIs..."
+}
+```
+
 **Error Responses:**
 - `401`: Invalid or expired agent token
-- `403`: Agent does not have `grove:gcp:token` scope, or no GCP identity assigned
+- `403`: Agent does not have `grove:gcp:token:<sa-id>` scope, or no GCP identity assigned
 - `502`: Hub failed to generate token from GCP (impersonation failed)
 - `503`: GCP IAM service unavailable
 
@@ -320,7 +348,7 @@ Note: The service account email is **not** in the request body. The Hub resolves
 func (s *Server) handleAgentGCPToken(w http.ResponseWriter, r *http.Request) {
     // 1. Extract agent identity from context (set by auth middleware)
     agent := GetAgentIdentityFromContext(r.Context())
-    if agent == nil || !agent.HasScope(AgentTokenScopeGCPToken) {
+    if agent == nil {
         http.Error(w, "forbidden", http.StatusForbidden)
         return
     }
@@ -332,7 +360,14 @@ func (s *Server) handleAgentGCPToken(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // 3. Parse requested scopes (or default)
+    // 3. Verify the agent's JWT scope matches the assigned SA
+    requiredScope := fmt.Sprintf("grove:gcp:token:%s", agentRecord.GCPIdentity.ServiceAccountID)
+    if !agent.HasScope(requiredScope) {
+        http.Error(w, "forbidden", http.StatusForbidden)
+        return
+    }
+
+    // 4. Parse requested scopes (or default)
     var req gcpTokenRequest
     json.NewDecoder(r.Body).Decode(&req)
     scopes := req.Scopes
@@ -340,7 +375,7 @@ func (s *Server) handleAgentGCPToken(w http.ResponseWriter, r *http.Request) {
         scopes = []string{"https://www.googleapis.com/auth/cloud-platform"}
     }
 
-    // 4. Generate access token via IAM Credentials API
+    // 5. Generate access token via IAM Credentials API
     token, err := s.gcpTokenGenerator.GenerateAccessToken(r.Context(),
         agentRecord.GCPIdentity.ServiceAccountEmail, scopes)
     if err != nil {
@@ -348,7 +383,11 @@ func (s *Server) handleAgentGCPToken(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // 5. Return token
+    // 6. Log token generation event
+    s.auditLog.LogGCPTokenGeneration(r.Context(), agent.ID(), agentRecord.GroveID,
+        agentRecord.GCPIdentity.ServiceAccountEmail)
+
+    // 7. Return token
     json.NewEncoder(w).Encode(token)
 }
 ```
@@ -358,6 +397,7 @@ func (s *Server) handleAgentGCPToken(w http.ResponseWriter, r *http.Request) {
 ```go
 type GCPTokenGenerator interface {
     GenerateAccessToken(ctx context.Context, serviceAccountEmail string, scopes []string) (*GCPAccessToken, error)
+    GenerateIDToken(ctx context.Context, serviceAccountEmail string, audience string) (*GCPIDToken, error)
     VerifyImpersonation(ctx context.Context, serviceAccountEmail string) error
 }
 
@@ -366,13 +406,17 @@ type GCPAccessToken struct {
     ExpiresIn   int    `json:"expires_in"`
     TokenType   string `json:"token_type"`
 }
+
+type GCPIDToken struct {
+    Token string `json:"token"`
+}
 ```
 
 The default implementation uses the [IAM Credentials API](https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken):
 
 ```go
 type iamTokenGenerator struct {
-    client *credentials.IamCredentialsClient  // google.golang.org/genproto/googleapis/iam/credentials/v1
+    client *credentials.IamCredentialsClient
 }
 
 func (g *iamTokenGenerator) GenerateAccessToken(ctx context.Context, email string, scopes []string) (*GCPAccessToken, error) {
@@ -390,18 +434,32 @@ func (g *iamTokenGenerator) GenerateAccessToken(ctx context.Context, email strin
         TokenType:   "Bearer",
     }, nil
 }
+
+func (g *iamTokenGenerator) GenerateIDToken(ctx context.Context, email string, audience string) (*GCPIDToken, error) {
+    resp, err := g.client.GenerateIdToken(ctx, &credentialspb.GenerateIdTokenRequest{
+        Name:     fmt.Sprintf("projects/-/serviceAccounts/%s", email),
+        Audience: audience,
+    })
+    if err != nil {
+        return nil, fmt.Errorf("IAM generateIdToken failed: %w", err)
+    }
+    return &GCPIDToken{Token: resp.Token}, nil
+}
 ```
 
 ### 5. New Agent Token Scope
 
-Add a new scope to `AgentTokenScope`:
+Add a new scope pattern to `AgentTokenScope`:
 
 ```go
 const (
     // existing scopes...
-    AgentTokenScopeGCPToken AgentTokenScope = "grove:gcp:token"
+    // AgentTokenScopeGCPToken is a prefix — the full scope is "grove:gcp:token:<sa-id>"
+    AgentTokenScopeGCPTokenPrefix = "grove:gcp:token:"
 )
 ```
+
+The scope is parameterized with the specific service account ID (e.g., `grove:gcp:token:uuid-of-sa`). This ensures an agent can only request tokens for its specifically assigned service account, not any arbitrary service account registered to the grove.
 
 This scope is automatically added to the agent's JWT when provisioned with `metadata_mode: assign`.
 
@@ -410,10 +468,11 @@ This scope is automatically added to the agent's JWT when provisioned with `meta
 During agent provisioning (in `pkg/agent/provision.go` and `pkg/runtimebroker/start_context.go`):
 
 1. **Resolve GCP identity**: If the agent has a GCP identity assignment, fetch the service account details.
-2. **Inject metadata service spec**: Add the `gcp-metadata` service to `scion-services.yaml`.
-3. **Set environment**: Add `GCE_METADATA_HOST=localhost:18380` to the agent's environment.
-4. **Suppress conflicting auth**: When metadata mode is `assign` or `block`, ensure `GOOGLE_APPLICATION_CREDENTIALS` is **not** set (it takes higher precedence in ADC than the metadata server). If a user has explicitly set GAC via secrets, that should still win — the metadata server acts as a fallback.
-5. **Add JWT scope**: Include `grove:gcp:token` in the agent's JWT scopes.
+2. **Configure metadata server**: Set `SCION_METADATA_MODE`, `SCION_METADATA_PORT`, `SCION_METADATA_SA_EMAIL`, and `SCION_METADATA_PROJECT_ID` environment variables for sciontool.
+3. **Set agent environment**: Add `GCE_METADATA_HOST=localhost:18380` to the agent's environment.
+4. **Configure iptables (Docker runtime)**: When using Docker, add iptables rules to redirect `169.254.169.254` traffic to the local metadata sidecar port.
+5. **Suppress conflicting auth**: When metadata mode is `assign` or `block`, ensure `GOOGLE_APPLICATION_CREDENTIALS` is **not** set (it takes higher precedence in ADC than the metadata server). If a user has explicitly set GAC via secrets, that should still win — the metadata server acts as a fallback.
+6. **Add JWT scope**: Include `grove:gcp:token:<sa-id>` in the agent's JWT scopes.
 
 ## Alternatives Considered
 
@@ -443,7 +502,7 @@ During agent provisioning (in `pkg/agent/provision.go` and `pkg/runtimebroker/st
 - Not all client libraries support all WIF source types uniformly.
 - The metadata server approach is more universally compatible.
 
-**Verdict**: Interesting for future exploration, but metadata server emulation is more robust and universally supported.
+**Verdict**: Rejected. Metadata server emulation is more robust and universally supported.
 
 ### C. Network-Level Interception (iptables redirect)
 
@@ -455,9 +514,8 @@ During agent provisioning (in `pkg/agent/provision.go` and `pkg/runtimebroker/st
 - Requires `NET_ADMIN` capability in the container (security concern).
 - More complex to set up and debug.
 - May conflict with container networking (especially on Kubernetes where a real metadata server exists).
-- `GCE_METADATA_HOST` is supported by all major GCP client libraries, making iptables unnecessary for the primary use case.
 
-**Verdict**: Not needed initially. Can be added as an enhancement for edge cases (e.g., third-party tools that hardcode `169.254.169.254`).
+**Verdict**: Medium priority. Will be implemented for the Docker runtime as a complement to `GCE_METADATA_HOST`. Without iptables interception, an agent in `block` mode could use `curl` directly against `169.254.169.254` to bypass the block and gain access to the host's service account identity. The env var approach remains the primary mechanism and sole mechanism for runtimes where iptables is impractical (e.g., Kubernetes).
 
 ### D. Hub-Side Token Caching
 
@@ -470,87 +528,56 @@ During agent provisioning (in `pkg/agent/provision.go` and `pkg/runtimebroker/st
 - GCP access tokens are already valid for ~1 hour; sidecar-level caching is sufficient.
 - Adds complexity to the Hub.
 
-**Verdict**: Defer. Sidecar-level caching is adequate. Hub-level caching can be added later if IAM API rate limits become a concern.
+**Verdict**: Defer. Sidecar-level caching with proactive refresh is adequate. Hub-level caching can be added later if IAM API rate limits become a concern.
 
-## Open Questions
+## Resolved Questions
 
-### Q1: Should the default metadata mode be `block` or `passthrough`?
+### Q1: Default metadata mode — `block`
 
-**`block` (recommended)**: Prevents agents from accidentally using the broker's GCP identity. This is the safer default and follows the principle of least privilege. Agents that need GCP access must be explicitly granted it.
+Default to `block` in hosted mode. In local/solo mode, metadata interception is disabled (passthrough behavior).
 
-**`passthrough`**: Simpler for local development where the user is running on a GCE VM and wants agents to just work. Could be confusing in hosted mode where the broker's identity is not the user's.
+### Q2: Required role for SA registration — Grove admin
 
-**Proposal**: Default to `block` in hosted mode, `passthrough` in local/solo mode.
+Grove admins can manage service accounts, consistent with their existing ability to manage grove configuration.
 
-### Q2: What grove role should be required to register a service account?
+### Q3: Per-request scope restrictions — Not supported
 
-Options:
-- **Grove owner only**: Strictest. Only the person who created the grove can add SAs.
-- **Grove admin** (recommended): Admins can manage SAs, which aligns with their existing ability to manage grove configuration.
-- **Any grove member**: Too permissive — SA assignment affects all agents in the grove.
+Start with `cloud-platform` as the only supported scope. Fine-grained access control is handled via IAM roles on the service account itself, not via OAuth scope restrictions at the metadata layer.
 
-### Q3: Should agents be able to request tokens for specific scopes?
+### Q4: OIDC identity tokens — In scope (Phase 1)
 
-The current design has the Hub generate tokens with broad `cloud-platform` scope. Should agents be able to request narrower scopes?
+Identity token support via the `/identity` endpoint and `generateIdToken` IAM API is included in the MVP. This covers Cloud Run service-to-service auth and other OIDC flows.
 
-**Pros of scope restriction**: Follows least privilege; limits blast radius if token is exfiltrated.
+### Q5: Multiple service accounts per agent — Single
 
-**Cons**: Complicates the API; most real usage needs `cloud-platform`; GCP's own metadata server doesn't restrict scopes per-request.
-
-**Proposal**: Start with `cloud-platform` as the only supported scope. The scope is configured at SA registration time and not overridable per-request.
-
-### Q4: How should OIDC identity tokens be handled?
-
-The metadata server also serves OIDC identity tokens via `/instance/service-accounts/{account}/identity?audience=...`. These are used for Cloud Run service-to-service auth and other OIDC flows.
-
-The IAM Credentials API also supports `generateIdToken`. We could support this via the same Hub brokering pattern.
-
-**Proposal**: Defer to a follow-up. Access tokens cover the majority of use cases.
-
-### Q5: Should the metadata server support multiple service accounts?
-
-GCE VMs can have multiple service accounts attached. Should we support assigning multiple SAs to an agent?
-
-**Proposal**: Start with one SA per agent (served as both `default` and by email). Multiple SAs can be added later if needed.
+Start with one SA per agent (served as both `default` and by email). Multiple SAs can be added later if needed.
 
 ### Q6: Token lifetime and refresh strategy
 
-GCP access tokens typically last 3600 seconds. The metadata sidecar caches and refreshes them. Questions:
-- Should the Hub allow configuring shorter token lifetimes? (IAM API supports 300-3600s)
-- Should the sidecar proactively refresh before expiry, or only refresh on demand?
+3600s lifetime (GCP default). The sidecar uses proactive background refresh: after the first synchronous fetch, a Go timer pre-emptively requests a new token from the Hub before the current one expires (~300s before expiry). This prevents agent code from triggering synchronous Hub round-trips during active use.
 
-**Proposal**: 3600s lifetime (GCP default), demand-based refresh with a 60-second buffer. Proactive refresh adds complexity for minimal benefit since most agent sessions are short-lived.
+### Q7: Interaction with harness auth
 
-### Q7: How should this interact with existing harness auth?
-
-If an agent has both a Gemini API key (for the LLM) and a GCP identity (for API access), they should coexist. The metadata server provides ambient GCP identity; the API key provides LLM access. No conflict.
-
-However, if the harness auth is set to `vertex-ai` and relies on ADC, the metadata server identity would be used for the LLM too. This is actually desirable — it means the assigned SA needs Vertex AI permissions.
-
-**Proposal**: Document the interaction clearly. No code changes needed — ADC precedence handles it naturally.
+If an agent has both a Gemini API key (for the LLM) and a GCP identity (for API access), they coexist naturally. If harness auth uses `vertex-ai` and relies on ADC, the metadata server identity is used — the assigned SA needs Vertex AI permissions. No code changes needed; ADC precedence handles it.
 
 ### Q8: Audit logging
 
-Should the Hub log every token request? Every token generation? Options:
-- Log every request (high volume, noisy)
-- Log first request per agent per session (useful for audit, low volume)
-- Log on errors only
-
-**Proposal**: Log token generation events (not cache hits at the sidecar) with agent ID, grove ID, SA email, and timestamp. This provides an audit trail without excessive volume.
+Log token generation events (not sidecar cache hits) with agent ID, grove ID, SA email, and timestamp. This provides an audit trail without excessive volume.
 
 ## Implementation Sketch
 
 ### Phase 1: Foundation (MVP)
 
-**Goal**: End-to-end token flow for a single assigned SA.
+**Goal**: End-to-end token flow for a single assigned SA, including both access tokens and identity tokens.
 
 1. **Store layer**: Add `GCPServiceAccount` model and store interface methods.
 2. **Hub endpoints**: CRUD for grove service accounts + verify endpoint.
-3. **Hub token endpoint**: `POST /api/v1/agent/gcp-token` with IAM Credentials integration.
-4. **Agent token scope**: Add `grove:gcp:token` scope.
-5. **sciontool metadata server**: New `metadata-server` subcommand with HTTP server implementing token and project-id endpoints.
-6. **Provisioning changes**: Inject metadata service spec and `GCE_METADATA_HOST` env var.
+3. **Hub token endpoints**: `POST /api/v1/agent/gcp-token` and `POST /api/v1/agent/gcp-identity-token` with IAM Credentials integration.
+4. **Agent token scope**: Add `grove:gcp:token:<sa-id>` scoped scope.
+5. **sciontool metadata server**: In-process HTTP server within sciontool implementing token, identity token, and project-id endpoints, gated by `SCION_METADATA_MODE` env var.
+6. **Provisioning changes**: Set metadata server env vars and `GCE_METADATA_HOST`.
 7. **Agent model extension**: Add `GCPIdentityConfig` to agent creation/config.
+8. **SA assignment permission**: Implement `assign` permission check on service account resources.
 
 **Files to create/modify**:
 
@@ -560,18 +587,18 @@ Should the Hub log every token request? Every token generation? Options:
 | `pkg/store/store.go` | Add `GCPServiceAccountStore` interface |
 | `pkg/store/sqlite.go` | Implement store (if using SQLite) |
 | `pkg/hub/handlers_gcp_identity.go` | New: SA CRUD + verify handlers |
-| `pkg/hub/gcp_token.go` | New: Token generation + Hub endpoint handler |
+| `pkg/hub/gcp_token.go` | New: Token generation (access + ID) + Hub endpoint handlers |
 | `pkg/hub/server.go` | Register new routes |
-| `pkg/hub/agenttoken.go` | Add `grove:gcp:token` scope |
-| `pkg/sciontool/metadata/server.go` | New: Metadata HTTP server |
-| `cmd/sciontool/commands/metadata.go` | New: `metadata-server` subcommand |
-| `pkg/agent/provision.go` | Inject metadata service + env var |
+| `pkg/hub/agenttoken.go` | Add `grove:gcp:token:<sa-id>` scope |
+| `pkg/sciontool/metadata/server.go` | New: Metadata HTTP server (in-process) |
+| `pkg/agent/provision.go` | Set metadata env vars |
 | `pkg/runtimebroker/start_context.go` | Pass GCP identity config to provisioning |
 | `pkg/api/types.go` | Add `GCPIdentityConfig` to relevant types |
 
 ### Phase 2: Hardening
 
-- Block mode implementation (403 for token requests)
+- Block mode implementation (403 for token/identity requests)
+- iptables interception for Docker runtime
 - Audit logging for token generation events
 - CLI commands for SA management (`scion grove service-accounts add/list/remove/verify`)
 - Web UI for SA management and agent identity assignment
@@ -580,29 +607,30 @@ Should the Hub log every token request? Every token generation? Options:
 
 ### Phase 3: Extensions
 
-- OIDC identity token support (`/identity` endpoint)
 - Multiple service accounts per agent
 - Scope restrictions per SA registration
 - Hub-level token caching (if IAM API rate limits are hit)
 - Support for Workload Identity Federation as an alternative backend
-- iptables-based interception option for non-standard tools
+- iptables-based interception for non-Docker runtimes
 
 ## Security Considerations
 
 ### Threat Model
 
-1. **Malicious agent requests token for wrong SA**: Prevented — Hub resolves SA from agent's assignment, not from request body.
+1. **Malicious agent requests token for wrong SA**: Prevented — Hub resolves SA from agent's assignment, not from request body. Agent JWT scope is parameterized to the specific SA ID.
 2. **Agent exfiltrates access token**: Mitigated — tokens are short-lived (1 hour). No long-lived key material in the container.
-3. **Agent bypasses metadata sidecar**: In `block` mode, if `GCE_METADATA_HOST` is unset/overridden, requests go to `169.254.169.254` which is the real metadata server. On non-GCE hosts this fails naturally. On GCE, the agent would get the broker's identity — this is the existing behavior and `block` mode's iptables variant (Phase 3) addresses it.
+3. **Agent bypasses metadata sidecar**: In `block` mode with `GCE_METADATA_HOST` only, if the env var is unset/overridden, requests go to `169.254.169.254`. On non-GCE hosts this fails naturally. On GCE, the agent would get the broker's identity. The iptables variant (Phase 2, Docker runtime) closes this gap by intercepting at the network level.
 4. **Hub compromise exposes IAM credentials**: The Hub uses its own managed identity (GCE SA or Workload Identity) — no key files stored. Compromise of the Hub process allows token generation, but revoking the Hub's `serviceAccountTokenCreator` role immediately cuts off all agent tokens.
 5. **Broker compromise**: Broker never holds SA credentials. It only holds the agent JWT, which is scoped and short-lived.
+6. **Agent requests token for SA in another grove**: Prevented — JWT scope is bound to specific SA ID, and Hub verifies the SA is assigned to the requesting agent.
 
 ### Principle of Least Privilege
 
-- Agents only get tokens for their assigned SA.
+- Agents only get tokens for their assigned SA (enforced by parameterized JWT scope).
 - The Hub's own SA only needs `roles/iam.serviceAccountTokenCreator` on target SAs — not broad IAM permissions.
-- Agent JWTs require explicit `grove:gcp:token` scope.
+- Agent JWTs require explicit `grove:gcp:token:<sa-id>` scope.
 - Default metadata mode is `block`, requiring explicit opt-in.
+- SA assignment requires explicit permission on the service account resource.
 
 ## Dependencies
 
