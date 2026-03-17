@@ -30,6 +30,7 @@ import '../shared/env-var-list.js';
 import '../shared/secret-list.js';
 import '../shared/shared-dir-list.js';
 import '../shared/group-member-editor.js';
+import '../shared/gcp-service-account-list.js';
 
 interface Agent {
   id: string;
@@ -764,6 +765,11 @@ export class ScionPageGroveSettings extends LitElement {
               groveId=${this.groveId}
               apiBasePath="/api/v1/groves/${this.groveId}"
             ></scion-shared-dir-list>
+
+            <scion-gcp-service-account-list
+              groveId=${this.groveId}
+              compact
+            ></scion-gcp-service-account-list>
           `
         : ''}
       ${can(this.grove._capabilities, 'delete')

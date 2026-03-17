@@ -30,6 +30,7 @@ import type {
   AgentAppliedConfig,
   AgentInlineConfig,
   TelemetryConfig,
+  GCPIdentityConfig,
   Grove,
   Notification,
 } from '../../shared/types.js';
@@ -716,7 +717,10 @@ export class ScionPageAgentDetail extends LitElement {
     }
   }
 
-  private async handleAction(action: 'start' | 'stop' | 'delete', event?: MouseEvent): Promise<void> {
+  private async handleAction(
+    action: 'start' | 'stop' | 'delete',
+    event?: MouseEvent
+  ): Promise<void> {
     if (!this.agent) return;
 
     if (action === 'delete') {
@@ -757,9 +761,10 @@ export class ScionPageAgentDetail extends LitElement {
     };
 
     try {
-      const url = action === 'start'
-        ? `/api/v1/agents/${this.agentId}/start`
-        : `/api/v1/agents/${this.agentId}/stop`;
+      const url =
+        action === 'start'
+          ? `/api/v1/agents/${this.agentId}/start`
+          : `/api/v1/agents/${this.agentId}/stop`;
       const response = await apiFetch(url, { method: 'POST' });
 
       if (!response.ok) {
@@ -782,7 +787,7 @@ export class ScionPageAgentDetail extends LitElement {
   }
 
   private backgroundRefresh(): void {
-    this.fetchAndMergeAgent().catch(err => {
+    this.fetchAndMergeAgent().catch((err) => {
       console.warn('Background refresh failed:', err);
     });
   }
@@ -797,11 +802,15 @@ export class ScionPageAgentDetail extends LitElement {
 
   private handleTabShow(e: CustomEvent<{ name: string }>): void {
     if (e.detail.name === 'logs') {
-      const viewer = this.shadowRoot?.querySelector('scion-agent-log-viewer') as ScionAgentLogViewer | null;
+      const viewer = this.shadowRoot?.querySelector(
+        'scion-agent-log-viewer'
+      ) as ScionAgentLogViewer | null;
       viewer?.loadLogs();
     }
     if (e.detail.name === 'messages') {
-      const viewer = this.shadowRoot?.querySelector('scion-agent-message-viewer') as ScionAgentMessageViewer | null;
+      const viewer = this.shadowRoot?.querySelector(
+        'scion-agent-message-viewer'
+      ) as ScionAgentMessageViewer | null;
       viewer?.loadMessages();
     }
   }
@@ -840,9 +849,7 @@ export class ScionPageAgentDetail extends LitElement {
 
       <sl-tab-group @sl-tab-show=${this.handleTabShow}>
         <sl-tab slot="nav" panel="status">Status</sl-tab>
-        ${this.agent.cloudLogging
-          ? html`<sl-tab slot="nav" panel="logs">Logs</sl-tab>`
-          : nothing}
+        ${this.agent.cloudLogging ? html`<sl-tab slot="nav" panel="logs">Logs</sl-tab>` : nothing}
         ${this.agent.cloudLogging
           ? html`<sl-tab slot="nav" panel="messages">Messages</sl-tab>`
           : nothing}
@@ -855,7 +862,10 @@ export class ScionPageAgentDetail extends LitElement {
                 <scion-agent-log-viewer
                   agentId=${this.agentId}
                   .brokers=${this.agent.runtimeBrokerId
-                    ? { [this.agent.runtimeBrokerId]: this.agent.runtimeBrokerName || this.agent.runtimeBrokerId }
+                    ? {
+                        [this.agent.runtimeBrokerId]:
+                          this.agent.runtimeBrokerName || this.agent.runtimeBrokerId,
+                      }
                     : {}}
                 ></scion-agent-log-viewer>
               </sl-tab-panel>
@@ -1127,7 +1137,13 @@ export class ScionPageAgentDetail extends LitElement {
   }
 
   private renderConnectivityCard(agent: Agent) {
-    const candidates = [agent.lastSeen, agent.updated, agent.updatedAt, agent.created, agent.createdAt];
+    const candidates = [
+      agent.lastSeen,
+      agent.updated,
+      agent.updatedAt,
+      agent.created,
+      agent.createdAt,
+    ];
     const lastSeenStr = candidates.find((d) => d && !this.isZeroDate(d)) || '';
     return html`
       <div class="card">
@@ -1171,8 +1187,8 @@ export class ScionPageAgentDetail extends LitElement {
 
     return html`
       ${this.renderIdentityCard(agent)} ${this.renderHarnessModelCard(agent, cfg, inline)}
-      ${this.renderRuntimeCard(agent, inline)} ${this.renderConfigLimitsCard(inline)}
-      ${this.renderTelemetryCard(inline?.telemetry)}
+      ${this.renderRuntimeCard(agent, inline)} ${this.renderGCPIdentityCard(cfg?.gcpIdentity)}
+      ${this.renderConfigLimitsCard(inline)} ${this.renderTelemetryCard(inline?.telemetry)}
       ${this.renderInitialTaskCard(cfg)}
     `;
   }
@@ -1347,6 +1363,47 @@ export class ScionPageAgentDetail extends LitElement {
     `;
   }
 
+  private renderGCPIdentityCard(gcpIdentity: GCPIdentityConfig | undefined) {
+    if (!gcpIdentity) return nothing;
+
+    const modeVariant =
+      gcpIdentity.metadataMode === 'assign'
+        ? 'primary'
+        : gcpIdentity.metadataMode === 'passthrough'
+          ? 'warning'
+          : 'neutral';
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">GCP Identity</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Metadata Mode</span>
+            <span class="info-value">
+              <sl-badge variant=${modeVariant}>${gcpIdentity.metadataMode}</sl-badge>
+            </span>
+          </div>
+          ${gcpIdentity.metadataMode === 'assign' && gcpIdentity.serviceAccountEmail
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Service Account</span>
+                  <span class="info-value mono">${gcpIdentity.serviceAccountEmail}</span>
+                </div>
+              `
+            : ''}
+          ${gcpIdentity.metadataMode === 'assign' && gcpIdentity.projectId
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">GCP Project</span>
+                  <span class="info-value mono">${gcpIdentity.projectId}</span>
+                </div>
+              `
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
   private renderConfigLimitsCard(inline: AgentInlineConfig | undefined) {
     const maxTurns = inline?.max_turns ?? 0;
     const maxModelCalls = inline?.max_model_calls ?? 0;
@@ -1390,7 +1447,10 @@ export class ScionPageAgentDetail extends LitElement {
     return html`
       <div class="card">
         <h3 class="card-title">Telemetry</h3>
-        <div class="info-grid" style="margin-bottom: ${hasDestinations || hasFilter ? '1.25rem' : '0'}">
+        <div
+          class="info-grid"
+          style="margin-bottom: ${hasDestinations || hasFilter ? '1.25rem' : '0'}"
+        >
           <div class="info-item">
             <span class="info-label">Status</span>
             <span class="info-value">${enabledLabel}</span>

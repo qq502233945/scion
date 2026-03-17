@@ -23,7 +23,13 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 
-import type { Agent, Grove, RuntimeBroker, Template } from '../../shared/types.js';
+import type {
+  Agent,
+  Grove,
+  RuntimeBroker,
+  Template,
+  GCPServiceAccount,
+} from '../../shared/types.js';
 import { apiFetch } from '../../client/api.js';
 import '../shared/status-badge.js';
 
@@ -83,6 +89,15 @@ export class ScionPageAgentCreate extends LitElement {
 
   @state()
   private telemetryEnabled = false;
+
+  @state()
+  private gcpMetadataMode: 'block' | 'passthrough' | 'assign' = 'block';
+
+  @state()
+  private gcpServiceAccountId = '';
+
+  @state()
+  private gcpServiceAccounts: GCPServiceAccount[] = [];
 
   /** ID of an existing agent we're editing (came back from configure page) */
   private editingAgentId: string | null = null;
@@ -378,6 +393,11 @@ export class ScionPageAgentCreate extends LitElement {
             this.harness = this.templates[0].harness || 'gemini';
           }
         }
+
+        // Load GCP service accounts for selected grove
+        if (this.groveId) {
+          await this.loadGCPServiceAccounts();
+        }
       }
     } catch (err) {
       console.error('Failed to load form data:', err);
@@ -434,6 +454,18 @@ export class ScionPageAgentCreate extends LitElement {
         body.task = this.task.trim();
       }
 
+      // GCP identity assignment
+      if (this.gcpMetadataMode === 'assign' && this.gcpServiceAccountId) {
+        body.gcp_identity = {
+          metadata_mode: 'assign',
+          service_account_id: this.gcpServiceAccountId,
+        };
+      } else if (this.gcpMetadataMode === 'passthrough') {
+        body.gcp_identity = {
+          metadata_mode: 'passthrough',
+        };
+      }
+
       // Pass config options
       const config: Record<string, unknown> = {
         env: {
@@ -441,6 +473,13 @@ export class ScionPageAgentCreate extends LitElement {
         },
       };
       body.config = config;
+
+      // Validate GCP assign mode
+      if (this.gcpMetadataMode === 'assign' && !this.gcpServiceAccountId) {
+        this.error = 'Please select a service account for GCP identity assignment.';
+        this.submitting = false;
+        return;
+      }
 
       const response = await fetch('/api/v1/agents', {
         method: 'POST',
@@ -475,9 +514,7 @@ export class ScionPageAgentCreate extends LitElement {
 
       // If the backend didn't already start the agent, explicitly start it.
       const startedPhases = ['running', 'provisioning', 'cloning', 'starting'];
-      const alreadyStarted = agent?.phase
-        ? startedPhases.includes(agent.phase)
-        : false;
+      const alreadyStarted = agent?.phase ? startedPhases.includes(agent.phase) : false;
       if (!alreadyStarted) {
         const startResp = await fetch(`/api/v1/agents/${agentId}/start`, {
           method: 'POST',
@@ -546,6 +583,25 @@ export class ScionPageAgentCreate extends LitElement {
         body.task = this.task.trim();
       }
 
+      // GCP identity assignment
+      if (this.gcpMetadataMode === 'assign' && this.gcpServiceAccountId) {
+        body.gcp_identity = {
+          metadata_mode: 'assign',
+          service_account_id: this.gcpServiceAccountId,
+        };
+      } else if (this.gcpMetadataMode === 'passthrough') {
+        body.gcp_identity = {
+          metadata_mode: 'passthrough',
+        };
+      }
+
+      // Validate GCP assign mode
+      if (this.gcpMetadataMode === 'assign' && !this.gcpServiceAccountId) {
+        this.error = 'Please select a service account for GCP identity assignment.';
+        this.submittingEdit = false;
+        return;
+      }
+
       const response = await fetch('/api/v1/agents', {
         method: 'POST',
         credentials: 'include',
@@ -594,9 +650,7 @@ export class ScionPageAgentCreate extends LitElement {
   private selectBrokerForGrove(): void {
     const grove = this.groves.find((g) => g.id === this.groveId);
     if (grove?.defaultRuntimeBrokerId) {
-      const defaultBroker = this.brokers.find(
-        (b) => b.id === grove.defaultRuntimeBrokerId
-      );
+      const defaultBroker = this.brokers.find((b) => b.id === grove.defaultRuntimeBrokerId);
       if (defaultBroker) {
         this.brokerId = defaultBroker.id;
         this.autoSelectProfile();
@@ -634,9 +688,7 @@ export class ScionPageAgentCreate extends LitElement {
   private selectTemplateForGrove(): void {
     const visible = this.filteredTemplates;
     if (this.templateId && !visible.find((t) => t.id === this.templateId)) {
-      const defaultTemplate = visible.find(
-        (t) => t.slug === 'default' || t.name === 'default'
-      );
+      const defaultTemplate = visible.find((t) => t.slug === 'default' || t.name === 'default');
       if (defaultTemplate) {
         this.templateId = defaultTemplate.id;
         this.harness = defaultTemplate.harness || 'gemini';
@@ -681,7 +733,7 @@ export class ScionPageAgentCreate extends LitElement {
         return;
       }
       const data = (await res.json()) as { agent?: Agent } | Agent;
-      const agent: Agent = 'agent' in data && data.agent ? data.agent : data as Agent;
+      const agent: Agent = 'agent' in data && data.agent ? data.agent : (data as Agent);
 
       this.name = agent.name || '';
       this.groveId = agent.groveId || '';
@@ -706,6 +758,32 @@ export class ScionPageAgentCreate extends LitElement {
     } catch {
       // Best-effort deletion; navigate away regardless
     }
+  }
+
+  private async loadGCPServiceAccounts(): Promise<void> {
+    this.gcpServiceAccounts = [];
+    this.gcpServiceAccountId = '';
+    this.gcpMetadataMode = 'block';
+
+    if (!this.groveId) return;
+
+    try {
+      const res = await apiFetch(`/api/v1/groves/${this.groveId}/gcp-service-accounts`);
+      if (res.ok) {
+        const data = (await res.json()) as
+          | {
+              items?: GCPServiceAccount[];
+            }
+          | GCPServiceAccount[];
+        this.gcpServiceAccounts = Array.isArray(data) ? data : data.items || [];
+      }
+    } catch {
+      // Non-critical — just won't show GCP identity section
+    }
+  }
+
+  private get verifiedGCPServiceAccounts(): GCPServiceAccount[] {
+    return this.gcpServiceAccounts.filter((sa) => sa.verified);
   }
 
   private slugify(text: string): string {
@@ -738,7 +816,10 @@ export class ScionPageAgentCreate extends LitElement {
     }
 
     return html`
-      <a href="${this.sourceGrove ? `/groves/${this.sourceGrove.id}` : '/agents'}" class="back-link">
+      <a
+        href="${this.sourceGrove ? `/groves/${this.sourceGrove.id}` : '/agents'}"
+        class="back-link"
+      >
         <sl-icon name="arrow-left"></sl-icon>
         ${this.sourceGrove ? `To ${this.sourceGrove.name}` : 'Back to Agents'}
       </a>
@@ -802,6 +883,7 @@ export class ScionPageAgentCreate extends LitElement {
                 this.groveId = (e.target as HTMLElement & { value: string }).value;
                 this.selectBrokerForGrove();
                 this.selectTemplateForGrove();
+                void this.loadGCPServiceAccounts();
                 // Clear branch if new grove is not git-based
                 if (!this.selectedGrove?.gitRemote) {
                   this.branch = '';
@@ -827,9 +909,7 @@ export class ScionPageAgentCreate extends LitElement {
                   html`<sl-option value=${t.id}
                     >${t.displayName || t.name}${t.scope === 'grove'
                       ? ' (grove)'
-                      : ''}${t.description
-                      ? ` - ${t.description}`
-                      : ''}</sl-option
+                      : ''}${t.description ? ` - ${t.description}` : ''}</sl-option
                   >`
               )}
             </sl-select>
@@ -906,8 +986,7 @@ export class ScionPageAgentCreate extends LitElement {
                   >
                     <sl-option value="">Use broker default</sl-option>
                     ${this.selectedBrokerProfiles.map(
-                      (p) =>
-                        html`<sl-option value=${p.name}>${p.name} (${p.type})</sl-option>`
+                      (p) => html`<sl-option value=${p.name}>${p.name} (${p.type})</sl-option>`
                     )}
                   </sl-select>
                   <div class="hint">The runtime profile on the selected broker.</div>
@@ -929,6 +1008,72 @@ export class ScionPageAgentCreate extends LitElement {
             ></sl-textarea>
             <div class="hint">The task or prompt to start the agent with.</div>
           </div>
+
+          ${this.gcpServiceAccounts.length > 0
+            ? html`
+                <div class="form-field">
+                  <label for="gcp-mode">GCP Identity</label>
+                  <sl-select
+                    id="gcp-mode"
+                    .value=${this.gcpMetadataMode}
+                    @sl-change=${(e: Event) => {
+                      this.gcpMetadataMode = (e.target as HTMLElement & { value: string }).value as
+                        | 'block'
+                        | 'passthrough'
+                        | 'assign';
+                      if (this.gcpMetadataMode !== 'assign') {
+                        this.gcpServiceAccountId = '';
+                      }
+                    }}
+                  >
+                    <sl-option value="block">Block</sl-option>
+                    <sl-option value="assign">Assign Service Account</sl-option>
+                    <sl-option value="passthrough">Passthrough</sl-option>
+                  </sl-select>
+                  <div class="hint">
+                    ${this.gcpMetadataMode === 'block'
+                      ? 'Prevents the agent from accessing any GCP identity. Token requests are denied.'
+                      : this.gcpMetadataMode === 'assign'
+                        ? 'Assigns a registered GCP service account. GCP client libraries will authenticate automatically.'
+                        : 'No metadata interception. The agent inherits whatever GCP identity is available on the host.'}
+                  </div>
+                </div>
+
+                ${this.gcpMetadataMode === 'assign'
+                  ? html`
+                      <div class="form-field">
+                        <label for="gcp-sa">Service Account</label>
+                        ${this.verifiedGCPServiceAccounts.length > 0
+                          ? html`
+                              <sl-select
+                                id="gcp-sa"
+                                placeholder="Select a service account..."
+                                .value=${this.gcpServiceAccountId}
+                                @sl-change=${(e: Event) => {
+                                  this.gcpServiceAccountId = (
+                                    e.target as HTMLElement & { value: string }
+                                  ).value;
+                                }}
+                              >
+                                ${this.verifiedGCPServiceAccounts.map(
+                                  (sa) =>
+                                    html`<sl-option value=${sa.id}>
+                                      ${sa.email}${sa.displayName ? ` (${sa.displayName})` : ''}
+                                    </sl-option>`
+                                )}
+                              </sl-select>
+                            `
+                          : html`
+                              <div class="hint" style="margin-top: 0;">
+                                No verified service accounts available. Register and verify service
+                                accounts in grove settings.
+                              </div>
+                            `}
+                      </div>
+                    `
+                  : ''}
+              `
+            : ''}
 
           <div class="notify-field">
             <sl-checkbox

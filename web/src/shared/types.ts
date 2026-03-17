@@ -339,6 +339,7 @@ export interface AgentAppliedConfig {
   templateId?: string;
   templateHash?: string;
   inlineConfig?: AgentInlineConfig;
+  gcpIdentity?: GCPIdentityConfig;
 }
 
 /**
@@ -579,6 +580,37 @@ export interface ListResponse<T> {
   _capabilities?: Capabilities;
   nextCursor?: string;
   totalCount?: number;
+}
+
+// ---------------------------------------------------------------------------
+// GCP Identity types
+// ---------------------------------------------------------------------------
+
+export interface GCPServiceAccount {
+  id: string;
+  scope: string;
+  scopeId: string;
+  email: string;
+  projectId: string;
+  displayName: string;
+  defaultScopes: string[];
+  verified: boolean;
+  verifiedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+  _capabilities?: Capabilities;
+}
+
+export interface GCPIdentityConfig {
+  metadataMode: 'block' | 'passthrough' | 'assign';
+  serviceAccountId?: string;
+  serviceAccountEmail?: string;
+  projectId?: string;
+}
+
+export interface GCPIdentityAssignment {
+  metadataMode: 'block' | 'passthrough' | 'assign';
+  serviceAccountId?: string;
 }
 
 // ---------------------------------------------------------------------------
