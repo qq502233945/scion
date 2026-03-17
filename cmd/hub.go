@@ -1882,7 +1882,8 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 	// Check if grove already exists on Hub
 	// Prefer hub.groveId (explicit link) over grove_id (deterministic local ID)
 	hubLookupID := settings.GetHubGroveID()
-	if hubLookupID == "" {
+	hasExplicitHubLink := hubLookupID != ""
+	if !hasExplicitHubLink {
 		hubLookupID = groveID
 	}
 	hubGrove, err := getLinkedGrove(ctx, client, hubLookupID)
@@ -1893,8 +1894,8 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 	if hubGrove != nil && hubGrove.Name == groveName {
 		fmt.Printf("Grove '%s' is already linked to the Hub (ID: %s)\n", groveName, groveID)
 	} else {
-		if hubGrove != nil {
-			// Local grove_id points to a different grove on the Hub — stale link.
+		if hubGrove != nil && hasExplicitHubLink {
+			// Explicit hub.groveId points to a different grove on the Hub — stale link.
 			// In V1 settings, hub.grove_id and grove_id share a single field, so
 			// a previous link may have overwritten the local grove_id with the
 			// stale hub grove ID. Regenerate from the marker file or directory
@@ -1916,6 +1917,14 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 			if err := config.UpdateSetting(resolvedPath, "grove_id", groveID, isGlobal); err != nil {
 				return fmt.Errorf("failed to save grove_id: %w", err)
 			}
+		} else if hubGrove != nil {
+			// Deterministic grove_id (from git remote hash) matched a different
+			// grove on the Hub. This is not a stale link — it's an ID collision
+			// because multiple groves share the same git remote. Ignore the match
+			// and proceed to register or link by name.
+			util.Debugf("Deterministic grove_id %s matched hub grove '%s' (different from local '%s'); ignoring collision",
+				hubLookupID, hubGrove.Name, groveName)
+			hubGrove = nil
 		}
 		// Check for existing groves with the same name
 		resp, err := client.Groves().List(ctx, &hubclient.ListGrovesOptions{
