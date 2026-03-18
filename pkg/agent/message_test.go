@@ -18,13 +18,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/runtime"
 )
 
 func TestMessage(t *testing.T) {
+	// Interrupt messages bypass the buffer and are delivered immediately.
 	mockRT := &runtime.MockRuntime{
 		ListFunc: func(ctx context.Context, filter map[string]string) ([]api.AgentInfo, error) {
 			return []api.AgentInfo{
@@ -47,6 +50,11 @@ func TestMessage(t *testing.T) {
 	mgr := &AgentManager{
 		Runtime: mockRT,
 	}
+	// Initialize buffer (not used for interrupt messages, but needed to avoid nil).
+	mgr.msgBuffer = NewMessageBuffer(100*time.Millisecond, func(agentID, message string, interrupt bool) error {
+		return mgr.deliverImmediate(context.Background(), agentID, message, interrupt)
+	})
+	defer mgr.msgBuffer.Close()
 
 	ctx := context.Background()
 	err := mgr.Message(ctx, "test-agent", "hello world", true)
@@ -72,6 +80,8 @@ func TestMessage(t *testing.T) {
 }
 
 func TestBroadcast(t *testing.T) {
+	// Non-interrupt messages go through the debounce buffer. When sent to
+	// different agents, each agent's buffer flushes independently.
 	mockRT := &runtime.MockRuntime{
 		ListFunc: func(ctx context.Context, filter map[string]string) ([]api.AgentInfo, error) {
 			return []api.AgentInfo{
@@ -91,18 +101,33 @@ func TestBroadcast(t *testing.T) {
 		},
 	}
 
+	var mu sync.Mutex
 	var capturedCalls []string
+	done := make(chan struct{}, 2)
 	mockRT.ExecFunc = func(ctx context.Context, id string, cmd []string) (string, error) {
+		mu.Lock()
 		capturedCalls = append(capturedCalls, fmt.Sprintf("%s: %s", id, strings.Join(cmd, " ")))
+		// Signal done after the final tmux command for each agent delivery
+		// (the trailing Enter keypress).
+		if cmd[len(cmd)-1] == "Enter" && len(cmd) == 5 {
+			done <- struct{}{}
+		}
+		mu.Unlock()
 		return "", nil
 	}
 
 	mgr := &AgentManager{
 		Runtime: mockRT,
 	}
+	// Use a short buffer delay for testing.
+	mgr.msgBuffer = NewMessageBuffer(100*time.Millisecond, func(agentID, message string, interrupt bool) error {
+		return mgr.deliverImmediate(context.Background(), agentID, message, interrupt)
+	})
+	defer mgr.msgBuffer.Close()
 
 	ctx := context.Background()
-	// Broad cast is handled by CLI loop usually, but let's test mgr.Message on both
+	// Broadcast is handled by CLI loop usually, but let's test mgr.Message on both.
+	// Non-interrupt messages are buffered and delivered after the debounce window.
 	err := mgr.Message(ctx, "test-agent-1", "hello", false)
 	if err != nil {
 		t.Fatalf("Message 1 failed: %v", err)
@@ -112,6 +137,18 @@ func TestBroadcast(t *testing.T) {
 		t.Fatalf("Message 2 failed: %v", err)
 	}
 
+	// Wait for both buffered deliveries to complete.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for buffered delivery")
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
 	expectedCalls := []string{
 		"agent-1: tmux send-keys -t scion:0 hello Enter",
 		"agent-1: tmux send-keys -t scion:0 Enter",
@@ -120,12 +157,32 @@ func TestBroadcast(t *testing.T) {
 	}
 
 	if len(capturedCalls) != len(expectedCalls) {
-		t.Fatalf("Expected %d calls, got %d", len(expectedCalls), len(capturedCalls))
+		t.Fatalf("Expected %d calls, got %d: %v", len(expectedCalls), len(capturedCalls), capturedCalls)
 	}
 
-	for i, call := range capturedCalls {
-		if call != expectedCalls[i] {
-			t.Errorf("Expected call %d to be '%s', got '%s'", i, expectedCalls[i], call)
+	// Since buffer delivery is async, agents may flush in either order.
+	// Verify each agent's commands appear together and in the right sequence.
+	agent1Calls := filterByPrefix(capturedCalls, "agent-1:")
+	agent2Calls := filterByPrefix(capturedCalls, "agent-2:")
+
+	if len(agent1Calls) != 2 || len(agent2Calls) != 2 {
+		t.Fatalf("Expected 2 calls per agent, got agent-1=%d agent-2=%d", len(agent1Calls), len(agent2Calls))
+	}
+	if agent1Calls[0] != "agent-1: tmux send-keys -t scion:0 hello Enter" {
+		t.Errorf("Unexpected agent-1 call[0]: %s", agent1Calls[0])
+	}
+	if agent2Calls[0] != "agent-2: tmux send-keys -t scion:0 hello Enter" {
+		t.Errorf("Unexpected agent-2 call[0]: %s", agent2Calls[0])
+	}
+}
+
+// filterByPrefix returns entries from calls that start with the given prefix.
+func filterByPrefix(calls []string, prefix string) []string {
+	var result []string
+	for _, c := range calls {
+		if strings.HasPrefix(c, prefix) {
+			result = append(result, c)
 		}
 	}
+	return result
 }

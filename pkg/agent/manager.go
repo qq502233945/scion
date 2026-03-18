@@ -53,13 +53,25 @@ type Manager interface {
 }
 
 type AgentManager struct {
-	Runtime runtime.Runtime
+	Runtime   runtime.Runtime
+	msgBuffer *MessageBuffer
 }
 
+// defaultBufferDelay is the debounce window for message delivery.
+// Messages arriving within this window are coalesced into a single delivery.
+const defaultBufferDelay = 2 * time.Second
+
 func NewManager(rt runtime.Runtime) Manager {
-	return &AgentManager{
+	mgr := &AgentManager{
 		Runtime: rt,
 	}
+	// Initialize the message buffer with a debounce delay. The buffer's
+	// delivery function calls back into deliverImmediate to perform the
+	// actual tmux send-keys when the debounce window expires.
+	mgr.msgBuffer = NewMessageBuffer(defaultBufferDelay, func(agentID string, message string, interrupt bool) error {
+		return mgr.deliverImmediate(context.Background(), agentID, message, interrupt)
+	})
+	return mgr
 }
 
 func (m *AgentManager) Stop(ctx context.Context, agentID string) error {
@@ -120,6 +132,26 @@ func (m *AgentManager) Watch(ctx context.Context, agentID string) (<-chan api.St
 }
 
 func (m *AgentManager) Message(ctx context.Context, agentID string, message string, interrupt bool) error {
+	// Interrupt messages bypass the buffer entirely — they need to send
+	// Ctrl+C immediately to get the agent's attention, and the accompanying
+	// message (if any) should follow without delay.
+	if interrupt {
+		return m.deliverImmediate(ctx, agentID, message, interrupt)
+	}
+
+	// Non-interrupt messages go through the debounce buffer. This ensures
+	// that a rapid burst of messages (e.g. from multiple senders or broadcast
+	// fan-out) is coalesced into a single delivery, avoiding contention on
+	// the agent's tmux input.
+	m.msgBuffer.Send(agentID, message)
+	return nil
+}
+
+// deliverImmediate sends a message to an agent's tmux session right now,
+// bypassing the message buffer. This is the low-level delivery mechanism
+// used both for interrupt messages (called directly) and for buffered
+// messages (called by the MessageBuffer when the debounce timer fires).
+func (m *AgentManager) deliverImmediate(ctx context.Context, agentID string, message string, interrupt bool) error {
 	// 1. Find the agent
 	agents, err := m.List(ctx, nil)
 	if err != nil {

@@ -1083,14 +1083,21 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 
-	// Log message delivery
+	// Log message acceptance. Non-interrupt messages are buffered with a
+	// debounce delay before actual tmux delivery, so we log "accepted"
+	// rather than "delivered". Interrupt messages bypass the buffer and
+	// are delivered immediately.
+	logMsg := "message accepted (buffered)"
+	if req.Interrupt {
+		logMsg = "message delivered (interrupt, unbuffered)"
+	}
 	logAttrs := []any{"agent_id", id}
 	if req.StructuredMessage != nil {
 		logAttrs = append(logAttrs, req.StructuredMessage.LogAttrs()...)
 	}
-	s.messageLog.Info("message delivered", logAttrs...)
+	s.messageLog.Info(logMsg, logAttrs...)
 	if s.dedicatedMessageLog != nil {
-		s.dedicatedMessageLog.Info("message delivered", logAttrs...)
+		s.dedicatedMessageLog.Info(logMsg, logAttrs...)
 	}
 
 	w.WriteHeader(http.StatusOK)
