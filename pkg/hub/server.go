@@ -1447,6 +1447,20 @@ func (s *Server) StartBackgroundServices(ctx context.Context) {
 	s.scheduler.RegisterEventHandler("message", s.messageEventHandler())
 	s.scheduler.RegisterEventHandler("dispatch_agent", s.dispatchAgentEventHandler())
 	s.scheduler.RegisterRecurring("schedule-evaluator", 1, s.evaluateSchedulesHandler())
+
+	// Register GitHub App health check if the app is configured
+	s.mu.RLock()
+	ghAppConfigured := s.config.GitHubAppConfig.AppID != 0
+	ghWebhooksEnabled := s.config.GitHubAppConfig.WebhooksEnabled
+	s.mu.RUnlock()
+	if ghAppConfigured {
+		interval := 360 // 6 hours in minutes when webhooks are disabled
+		if ghWebhooksEnabled {
+			interval = 1440 // 24 hours when webhooks are enabled
+		}
+		s.scheduler.RegisterRecurring("github-app-health-check", interval, s.githubAppHealthCheckHandler())
+	}
+
 	s.scheduler.Start(ctx)
 
 	// Start notification dispatcher (uses the current event publisher).
@@ -1665,6 +1679,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/github-app/installations", s.handleGitHubAppInstallations)
 	s.mux.HandleFunc("/api/v1/github-app/installations/", s.handleGitHubAppInstallations)
 	s.mux.HandleFunc("/api/v1/github-app/installations/discover", s.handleGitHubAppDiscover)
+	s.mux.HandleFunc("/api/v1/github-app/sync-permissions", s.handleGitHubAppSyncPermissions)
 
 	// GitHub App webhook and setup callback (unauthenticated — uses webhook signature)
 	s.mux.HandleFunc("/api/v1/webhooks/github", s.handleGitHubWebhook)
