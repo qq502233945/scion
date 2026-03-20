@@ -769,6 +769,7 @@ func (s *Server) createAgentInGrove(
 					})
 					return
 				} else {
+					s.preserveTerminalPhase(ctx, agent)
 					if agent.Phase == string(state.PhaseCreated) {
 						agent.Phase = string(state.PhaseProvisioning)
 					}
@@ -795,6 +796,7 @@ func (s *Server) createAgentInGrove(
 					MissingEnvVars(w, envReqs.Needs, s.buildEnvGatherResponse(ctx, agent, envReqs))
 					return
 				} else {
+					s.preserveTerminalPhase(ctx, agent)
 					if agent.Phase == string(state.PhaseCreated) {
 						agent.Phase = string(state.PhaseProvisioning)
 					}
@@ -825,6 +827,26 @@ func (s *Server) createAgentInGrove(
 		Agent:    agent,
 		Warnings: warnings,
 	})
+}
+
+// preserveTerminalPhase re-reads the agent from the database and, if a
+// concurrent status update has moved the agent to a terminal phase (error or
+// stopped), preserves that phase on the in-memory agent so the subsequent
+// UpdateAgent call does not overwrite it with the broker-reported phase.
+// This prevents a race where sciontool reports an error (e.g. git clone
+// failure) while the broker dispatch is still in flight.
+func (s *Server) preserveTerminalPhase(ctx context.Context, agent *store.Agent) {
+	current, err := s.store.GetAgent(ctx, agent.ID)
+	if err != nil {
+		return
+	}
+	p := state.Phase(current.Phase)
+	if p == state.PhaseError || p == state.PhaseStopped {
+		agent.Phase = current.Phase
+		agent.Activity = current.Activity
+		agent.Message = current.Message
+		agent.StateVersion = current.StateVersion
+	}
 }
 
 // buildEnvGatherResponse converts a broker's env requirements into the Hub-level

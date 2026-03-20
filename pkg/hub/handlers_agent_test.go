@@ -3692,3 +3692,75 @@ func TestCreateAgent_GCPPassthrough_AdminAllowed(t *testing.T) {
 	})
 	require.Equal(t, http.StatusCreated, rec.Code)
 }
+
+func TestPreserveTerminalPhase(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-tp", Name: "TP Grove", Slug: "tp-grove"}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	t.Run("preserves error phase", func(t *testing.T) {
+		agent := &store.Agent{
+			ID:      "agent-tp-error",
+			Slug:    "agent-tp-error",
+			Name:    "TP Error Agent",
+			GroveID: grove.ID,
+			Phase:   string(state.PhaseCreated),
+		}
+		require.NoError(t, s.CreateAgent(ctx, agent))
+
+		// Simulate sciontool reporting error via UpdateAgentStatus (concurrent update)
+		require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+			Phase:   string(state.PhaseError),
+			Message: "git clone failed: no GITHUB_TOKEN",
+		}))
+
+		// Simulate broker response setting phase to running on the in-memory agent
+		agent.Phase = string(state.PhaseRunning)
+		agent.Activity = string(state.ActivityIdle)
+
+		// preserveTerminalPhase should detect the DB has error and preserve it
+		srv.preserveTerminalPhase(ctx, agent)
+
+		assert.Equal(t, string(state.PhaseError), agent.Phase)
+		assert.Equal(t, "git clone failed: no GITHUB_TOKEN", agent.Message)
+	})
+
+	t.Run("preserves stopped phase", func(t *testing.T) {
+		agent := &store.Agent{
+			ID:      "agent-tp-stopped",
+			Slug:    "agent-tp-stopped",
+			Name:    "TP Stopped Agent",
+			GroveID: grove.ID,
+			Phase:   string(state.PhaseCreated),
+		}
+		require.NoError(t, s.CreateAgent(ctx, agent))
+
+		require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+			Phase: string(state.PhaseStopped),
+		}))
+
+		agent.Phase = string(state.PhaseRunning)
+		srv.preserveTerminalPhase(ctx, agent)
+
+		assert.Equal(t, string(state.PhaseStopped), agent.Phase)
+	})
+
+	t.Run("does not overwrite non-terminal phase", func(t *testing.T) {
+		agent := &store.Agent{
+			ID:      "agent-tp-running",
+			Slug:    "agent-tp-running",
+			Name:    "TP Running Agent",
+			GroveID: grove.ID,
+			Phase:   string(state.PhaseCreated),
+		}
+		require.NoError(t, s.CreateAgent(ctx, agent))
+
+		// DB still has "created" phase — broker says "running", should keep "running"
+		agent.Phase = string(state.PhaseRunning)
+		srv.preserveTerminalPhase(ctx, agent)
+
+		assert.Equal(t, string(state.PhaseRunning), agent.Phase)
+	})
+}
