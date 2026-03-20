@@ -130,9 +130,21 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 		if isContainerRunning && agents[i].Phase == string(state.PhaseStopped) {
 			agents[i].Phase = string(state.PhaseRunning)
 		}
-		if isContainerStopped && agents[i].Phase == string(state.PhaseRunning) {
-			agents[i].Phase = string(state.PhaseStopped)
-			agents[i].Activity = ""
+		if isContainerStopped {
+			p := state.Phase(agents[i].Phase)
+			switch p {
+			case state.PhaseRunning:
+				agents[i].Phase = string(state.PhaseStopped)
+				agents[i].Activity = ""
+			case state.PhaseCloning, state.PhaseStarting, state.PhaseProvisioning:
+				// Container exited during a pre-running phase (e.g. clone failure
+				// where agent-info.json wasn't updated). Mark as error so the
+				// UI doesn't show a stale "cloning" or "starting" phase.
+				agents[i].Phase = string(state.PhaseError)
+				agents[i].Activity = ""
+			case state.PhaseError, state.PhaseStopped:
+				// Already terminal — preserve as-is
+			}
 		}
 	}
 

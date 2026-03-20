@@ -818,7 +818,18 @@ func (s *Server) createAgentInGrove(
 		}
 	}
 
-	s.events.PublishAgentCreated(ctx, agent)
+	// Re-read the agent from the database before publishing the "created" event.
+	// A concurrent status update (e.g. sciontool reporting a clone error) may have
+	// changed the phase between our last UpdateAgent and now. Publishing the stale
+	// in-memory object would send a "created" SSE event with the wrong phase,
+	// and since the frontend may have already dropped the earlier "status" event
+	// (it ignores status events for agents not yet in state), the UI would never
+	// reflect the error.
+	if latest, err := s.store.GetAgent(ctx, agent.ID); err == nil {
+		s.events.PublishAgentCreated(ctx, latest)
+	} else {
+		s.events.PublishAgentCreated(ctx, agent)
+	}
 
 	// Enrich agent with grove and broker names for display
 	s.enrichAgent(ctx, agent, grove, nil)

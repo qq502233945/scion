@@ -75,6 +75,15 @@ export class StateManager extends EventTarget {
     scopeCapabilities: undefined,
   };
 
+  /**
+   * Buffer for status deltas that arrived before the agent's "created" event.
+   * When a clone fails quickly, the hub may publish the "status" SSE event
+   * (with phase=error) before the "created" event. Without buffering, the
+   * status delta would be dropped and the UI would never reflect the error.
+   * Buffered deltas are applied when the "created" event arrives.
+   */
+  private pendingAgentDeltas = new Map<string, Partial<Agent>>();
+
   private sseClient = new SSEClient();
 
   constructor() {
@@ -145,6 +154,7 @@ export class StateManager extends EventTarget {
     this.state.deletedGroveIds.clear();
     this.state.deletedAgentIds.clear();
     this.state.scopeCapabilities = undefined;
+    this.pendingAgentDeltas.clear();
 
     const subjects = this.subjectsForScope(scope);
     if (subjects.length > 0) {
@@ -253,17 +263,33 @@ export class StateManager extends EventTarget {
     if (eventType === 'deleted') {
       this.state.agents.delete(agentId);
       this.state.deletedAgentIds.add(agentId);
+      this.pendingAgentDeltas.delete(agentId);
     } else {
-      // For non-created events, only merge into agents already in state.
-      // This prevents partial status deltas from creating incomplete rows
-      // for agents the client hasn't seen yet. New agents arrive via
-      // 'created' events which carry the full snapshot.
       const existing = this.state.agents.get(agentId);
       if (!existing && eventType !== 'created') {
+        // Agent not yet in state. Buffer the delta so it can be applied
+        // when the "created" event arrives. This handles the race where
+        // a status update (e.g. clone error) arrives before the "created"
+        // event due to concurrent SSE publishing.
+        const delta = data as Partial<Agent>;
+        const prev = this.pendingAgentDeltas.get(agentId);
+        this.pendingAgentDeltas.set(agentId, prev ? { ...prev, ...delta } : delta);
         return;
       }
-      const base = existing || ({} as Agent);
-      const delta = data as Partial<Agent>;
+      let base = existing || ({} as Agent);
+
+      // For "created" events, apply any buffered deltas that arrived early.
+      // The buffered delta is applied AFTER the created snapshot so that
+      // status updates (like phase=error) take precedence.
+      let delta = data as Partial<Agent>;
+      if (eventType === 'created') {
+        const pending = this.pendingAgentDeltas.get(agentId);
+        if (pending) {
+          delta = { ...delta, ...pending };
+          this.pendingAgentDeltas.delete(agentId);
+        }
+      }
+
       // Preserve sticky activities: if the incoming activity is idle/empty
       // but the existing activity is sticky, keep the existing value.
       const incomingActivity = delta.activity as string | undefined;
@@ -275,9 +301,12 @@ export class StateManager extends EventTarget {
       ) {
         delete delta.activity;
       }
-      // Promote limits tracking fields from SSE detail to top-level agent
+      // Promote detail fields from SSE detail to top-level agent
       const detail = delta.detail as import('../shared/types.js').AgentDetail | undefined;
       if (detail) {
+        if (detail.message) {
+          (delta as Record<string, unknown>).message = detail.message;
+        }
         if (detail.currentTurns !== undefined) {
           (delta as Record<string, unknown>).currentTurns = detail.currentTurns;
         }
