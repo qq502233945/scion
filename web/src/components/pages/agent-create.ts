@@ -113,6 +113,7 @@ export class ScionPageAgentCreate extends LitElement {
     string,
     {
       defaultTemplate?: string;
+      defaultHarnessConfig?: string;
       defaultMaxTurns?: number;
       defaultMaxModelCalls?: number;
       defaultMaxDuration?: string;
@@ -690,24 +691,26 @@ export class ScionPageAgentCreate extends LitElement {
   }
 
   /**
-   * Select the default template for the current grove using grove settings.
+   * Select the default template and harness for the current grove using grove settings.
    * Falls back to a template named "default", then the first available template.
+   * The harness is determined by: template harness > grove defaultHarnessConfig > 'gemini'.
    */
   private async selectDefaultTemplate(): Promise<void> {
     const visible = this.filteredTemplates;
 
-    // Try grove settings first
-    if (this.groveId) {
-      const settings = await this.fetchGroveSettings(this.groveId);
-      if (settings?.defaultTemplate) {
-        const match = visible.find(
-          (t) => t.name === settings.defaultTemplate || t.slug === settings.defaultTemplate
-        );
-        if (match) {
-          this.templateId = match.id;
-          this.harness = match.harness || 'gemini';
-          return;
-        }
+    // Fetch grove settings (used for both template and harness defaults)
+    const settings = this.groveId ? await this.fetchGroveSettings(this.groveId) : null;
+    const harnessDefault = settings?.defaultHarnessConfig || 'gemini';
+
+    // Try grove settings default template first
+    if (settings?.defaultTemplate) {
+      const match = visible.find(
+        (t) => t.name === settings.defaultTemplate || t.slug === settings.defaultTemplate
+      );
+      if (match) {
+        this.templateId = match.id;
+        this.harness = match.harness || harnessDefault;
+        return;
       }
     }
 
@@ -715,12 +718,13 @@ export class ScionPageAgentCreate extends LitElement {
     const fallback = visible.find((t) => t.slug === 'default' || t.name === 'default');
     if (fallback) {
       this.templateId = fallback.id;
-      this.harness = fallback.harness || 'gemini';
+      this.harness = fallback.harness || harnessDefault;
     } else if (visible.length > 0) {
       this.templateId = visible[0].id;
-      this.harness = visible[0].harness || 'gemini';
+      this.harness = visible[0].harness || harnessDefault;
     } else {
       this.templateId = '';
+      this.harness = harnessDefault;
     }
   }
 
@@ -817,6 +821,7 @@ export class ScionPageAgentCreate extends LitElement {
     groveId: string
   ): Promise<{
     defaultTemplate?: string;
+    defaultHarnessConfig?: string;
     defaultMaxTurns?: number;
     defaultMaxModelCalls?: number;
     defaultMaxDuration?: string;
@@ -831,6 +836,7 @@ export class ScionPageAgentCreate extends LitElement {
       if (res.ok) {
         const data = (await res.json()) as {
           defaultTemplate?: string;
+          defaultHarnessConfig?: string;
           defaultMaxTurns?: number;
           defaultMaxModelCalls?: number;
           defaultMaxDuration?: string;
