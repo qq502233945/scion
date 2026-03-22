@@ -24,9 +24,13 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Agent } from '../../shared/types.js';
+import type { PageData, Agent, AgentPhase, AgentActivity } from '../../shared/types.js';
 import { isTerminalAvailable } from '../../shared/types.js';
 import { extractApiError } from '../../client/api.js';
+import { SSEClient } from '../../client/sse-client.js';
+import type { SSEUpdateEvent } from '../../client/sse-client.js';
+import type { StatusType } from '../shared/status-badge.js';
+import '../shared/status-badge.js';
 
 // xterm.js imports are client-side only — guarded by typeof check in lifecycle
 // These will be imported dynamically in firstUpdated() since they require DOM APIs
@@ -80,12 +84,20 @@ export class ScionPageTerminal extends LitElement {
   @state()
   private activeWindow: TmuxWindow = 'agent';
 
+  @state()
+  private agentPhase: AgentPhase = 'created';
+
+  @state()
+  private agentActivity: AgentActivity | '' = '';
+
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private clipboardAddon: ClipboardAddon | null = null;
   private socket: WebSocket | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
+  private sseClient: SSEClient | null = null;
+  private sseUpdateHandler: ((e: CustomEvent<SSEUpdateEvent>) => void) | null = null;
 
   static override styles = css`
     :host {
@@ -316,6 +328,9 @@ export class ScionPageTerminal extends LitElement {
       const agent = (await response.json()) as Agent;
       this.agentName = agent.name;
       this.groveId = agent.groveId ?? '';
+      this.agentPhase = agent.phase;
+      this.agentActivity = agent.activity ?? '';
+      this.connectSSE();
 
       if (!isTerminalAvailable(agent)) {
         this.error = agent.activity === 'offline'
@@ -335,6 +350,43 @@ export class ScionPageTerminal extends LitElement {
       console.error('Failed to load agent:', err);
       this.error = err instanceof Error ? err.message : 'Failed to load agent';
       this.loading = false;
+    }
+  }
+
+  private get agentDisplayStatus(): string {
+    if (this.agentPhase === 'running' && this.agentActivity) {
+      return this.agentActivity;
+    }
+    return this.agentPhase;
+  }
+
+  private connectSSE(): void {
+    this.disconnectSSE();
+    const client = new SSEClient();
+    this.sseClient = client;
+    this.sseUpdateHandler = (e: CustomEvent<SSEUpdateEvent>) => {
+      const { subject, data } = e.detail;
+      // Only handle events for this agent
+      if (!subject.startsWith(`agent.${this.agentId}.`)) return;
+      const delta = data as Partial<Agent>;
+      if (delta.phase) this.agentPhase = delta.phase;
+      if (delta.activity !== undefined) this.agentActivity = delta.activity ?? '';
+    };
+    client.addEventListener('update', this.sseUpdateHandler);
+    client.connect([`agent.${this.agentId}.>`]);
+  }
+
+  private disconnectSSE(): void {
+    if (this.sseClient) {
+      if (this.sseUpdateHandler) {
+        this.sseClient.removeEventListener(
+          'update',
+          this.sseUpdateHandler as EventListenerOrEventListenerObject
+        );
+        this.sseUpdateHandler = null;
+      }
+      this.sseClient.disconnect();
+      this.sseClient = null;
     }
   }
 
@@ -561,6 +613,7 @@ export class ScionPageTerminal extends LitElement {
 
   private cleanup(): void {
     this.sendTmuxDetach();
+    this.disconnectSSE();
     if (this.socket) {
       this.socket.close(1000, 'detach');
       this.socket = null;
@@ -717,6 +770,10 @@ export class ScionPageTerminal extends LitElement {
           >${this.renderTerminalIcon()}</button>
         </div>
         <div class="spacer"></div>
+        <scion-status-badge
+          status=${this.agentDisplayStatus as StatusType}
+          size="small"
+        ></scion-status-badge>
         <div class="status-indicator">
           <span class="status-dot ${this.connected ? 'connected' : ''}"></span>
           ${this.connected ? 'Connected' : 'Disconnected'}
