@@ -204,7 +204,6 @@ func (m *AgentManager) deliverImmediate(ctx context.Context, agentID string, mes
 		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	} else {
 		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", message, "Enter"})
-		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	}
 
 	// 4. Execute
@@ -212,6 +211,18 @@ func (m *AgentManager) deliverImmediate(ctx context.Context, agentID string, mes
 		_, err := m.Runtime.Exec(ctx, agent.ContainerID, cmd)
 		if err != nil {
 			return fmt.Errorf("failed to send message to agent '%s': %w", agent.Name, err)
+		}
+	}
+
+	// After sending a message, send two extra Enter keypresses with a brief delay
+	// to ensure the input is accepted by the agent.
+	if message != "" {
+		enterCmd := []string{"tmux", "send-keys", "-t", "scion:0", "Enter"}
+		for range 2 {
+			time.Sleep(300 * time.Millisecond)
+			if _, err := m.Runtime.Exec(ctx, agent.ContainerID, enterCmd); err != nil {
+				return fmt.Errorf("failed to send Enter to agent '%s': %w", agent.Name, err)
+			}
 		}
 	}
 

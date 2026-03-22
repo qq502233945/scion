@@ -66,6 +66,7 @@ func TestMessage(t *testing.T) {
 		"tmux send-keys -t scion:0 C-c",
 		"tmux send-keys -t scion:0 hello world Enter",
 		"tmux send-keys -t scion:0 Enter",
+		"tmux send-keys -t scion:0 Enter",
 	}
 
 	if len(capturedCmd) != len(expectedCmds) {
@@ -103,12 +104,11 @@ func TestBroadcast(t *testing.T) {
 
 	var mu sync.Mutex
 	var capturedCalls []string
-	done := make(chan struct{}, 2)
+	done := make(chan struct{}, 4)
 	mockRT.ExecFunc = func(ctx context.Context, id string, cmd []string) (string, error) {
 		mu.Lock()
 		capturedCalls = append(capturedCalls, fmt.Sprintf("%s: %s", id, strings.Join(cmd, " ")))
-		// Signal done after the final tmux command for each agent delivery
-		// (the trailing Enter keypress).
+		// Signal done for each bare Enter keypress (two per agent delivery).
 		if cmd[len(cmd)-1] == "Enter" && len(cmd) == 5 {
 			done <- struct{}{}
 		}
@@ -137,8 +137,8 @@ func TestBroadcast(t *testing.T) {
 		t.Fatalf("Message 2 failed: %v", err)
 	}
 
-	// Wait for both buffered deliveries to complete.
-	for i := 0; i < 2; i++ {
+	// Wait for both buffered deliveries to complete (2 bare Enters per agent × 2 agents).
+	for i := 0; i < 4; i++ {
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
@@ -152,7 +152,9 @@ func TestBroadcast(t *testing.T) {
 	expectedCalls := []string{
 		"agent-1: tmux send-keys -t scion:0 hello Enter",
 		"agent-1: tmux send-keys -t scion:0 Enter",
+		"agent-1: tmux send-keys -t scion:0 Enter",
 		"agent-2: tmux send-keys -t scion:0 hello Enter",
+		"agent-2: tmux send-keys -t scion:0 Enter",
 		"agent-2: tmux send-keys -t scion:0 Enter",
 	}
 
@@ -165,8 +167,8 @@ func TestBroadcast(t *testing.T) {
 	agent1Calls := filterByPrefix(capturedCalls, "agent-1:")
 	agent2Calls := filterByPrefix(capturedCalls, "agent-2:")
 
-	if len(agent1Calls) != 2 || len(agent2Calls) != 2 {
-		t.Fatalf("Expected 2 calls per agent, got agent-1=%d agent-2=%d", len(agent1Calls), len(agent2Calls))
+	if len(agent1Calls) != 3 || len(agent2Calls) != 3 {
+		t.Fatalf("Expected 3 calls per agent, got agent-1=%d agent-2=%d", len(agent1Calls), len(agent2Calls))
 	}
 	if agent1Calls[0] != "agent-1: tmux send-keys -t scion:0 hello Enter" {
 		t.Errorf("Unexpected agent-1 call[0]: %s", agent1Calls[0])
