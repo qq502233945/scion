@@ -36,8 +36,8 @@ export class CreateBeamRenderer {
     // Freeze ring so positions stay fixed during beam travel
     agentRing.freezeRebalance();
 
-    // Calculate where the new agent will go on the ring
-    const targetPos = agentRing.getNextSlotPosition();
+    // Claim a slot position (accounts for other pending beams, adds jitter)
+    const targetPos = agentRing.claimNextSlotPosition();
 
     this.beams.push({
       fromAgent: requestedByName,

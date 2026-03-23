@@ -23,7 +23,8 @@ export class AgentRing {
   private centerX = 0;
   private centerY = 0;
   private animationPhase = 0;
-  private frozen = false;
+  private freezeCount = 0; // reference-counted freeze (multiple beams can overlap)
+  private pendingSlots = 0; // slots claimed by in-flight create beams
 
   init(agentInfos: AgentInfo[], centerX: number, centerY: number): void {
     this.centerX = centerX;
@@ -88,6 +89,9 @@ export class AgentRing {
       enterTime: now,
     });
 
+    // Release one pending slot if any (beam has delivered)
+    if (this.pendingSlots > 0) this.pendingSlots--;
+
     this.redistributeAgents();
   }
 
@@ -115,12 +119,15 @@ export class AgentRing {
   }
 
   private redistributeAgents(): void {
-    if (this.frozen) return;
+    if (this.freezeCount > 0) return;
     const liveAgents = this.getLiveAgents();
     const n = liveAgents.length;
     if (n === 0) return;
-    const now = Date.now();
 
+    // Sort by current angle to preserve ring order — prevents wild swings
+    liveAgents.sort((a, b) => normalizeAngle(a.angle) - normalizeAngle(b.angle));
+
+    const now = Date.now();
     liveAgents.forEach((agent, i) => {
       const newAngle = (2 * Math.PI * i) / n - Math.PI / 2;
       agent.prevAngle = agent.angle;
@@ -129,30 +136,46 @@ export class AgentRing {
     });
   }
 
-  /** Freeze agent positions — prevents rebalance animations during beam travel. */
+  /** Freeze agent positions — prevents rebalance animations during beam travel. Reference-counted. */
   freezeRebalance(): void {
-    this.frozen = true;
+    this.freezeCount++;
     // Stop any in-progress rebalance by snapping to current positions
     for (const agent of this.agents.values()) {
       if (agent.rebalanceStart > 0 && !agent.removing) {
         agent.prevAngle = agent.angle;
         agent.targetAngle = agent.angle;
         agent.rebalanceStart = 0;
+        // Snap x,y to match current angle
+        agent.x = this.centerX + Math.cos(agent.angle) * this.ringRadius;
+        agent.y = this.centerY + Math.sin(agent.angle) * this.ringRadius;
       }
     }
   }
 
-  /** Unfreeze and trigger a rebalance. */
+  /** Unfreeze (decrement ref count). Triggers rebalance when all freezes released. */
   unfreezeRebalance(): void {
-    this.frozen = false;
-    this.redistributeAgents();
+    this.freezeCount = Math.max(0, this.freezeCount - 1);
+    if (this.freezeCount === 0) {
+      this.redistributeAgents();
+    }
   }
 
-  /** Calculate where the next agent would be placed on the ring without adding it. */
-  getNextSlotPosition(): { x: number; y: number } {
+  /**
+   * Claim an estimated ring position for a new agent that doesn't exist yet.
+   * Accounts for existing live agents + previously claimed pending slots.
+   * Returns a position with slight angular jitter so rapid creates don't overlap.
+   */
+  claimNextSlotPosition(): { x: number; y: number } {
     const live = this.getLiveAgents();
-    const n = live.length + 1;
-    const angle = (2 * Math.PI * (n - 1)) / n - Math.PI / 2;
+    const totalAfter = live.length + this.pendingSlots + 1;
+    const slotIndex = live.length + this.pendingSlots;
+    this.pendingSlots++;
+
+    // Distribute evenly with jitter
+    const baseAngle = (2 * Math.PI * slotIndex) / totalAfter - Math.PI / 2;
+    const jitter = (Math.random() - 0.5) * 0.2;
+    const angle = baseAngle + jitter;
+
     return {
       x: this.centerX + Math.cos(angle) * this.ringRadius,
       y: this.centerY + Math.sin(angle) * this.ringRadius,
@@ -196,6 +219,8 @@ export class AgentRing {
 
   reset(): void {
     this.agents.clear();
+    this.freezeCount = 0;
+    this.pendingSlots = 0;
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -395,6 +420,11 @@ export class AgentRing {
         return '#198754';
     }
   }
+}
+
+/** Normalize angle to [0, 2π) for consistent sorting. */
+function normalizeAngle(a: number): number {
+  return ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 }
 
 // Easing functions

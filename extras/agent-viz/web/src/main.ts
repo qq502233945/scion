@@ -254,26 +254,34 @@ function handleEvent(evt: PlaybackEvent): void {
     case 'agent_destroy': {
       const lifecycle = evt.data as AgentLifecycleEvent;
 
-      // If we know who requested the destroy, show a laser beam
       if (lifecycle.requestedBy) {
+        // Fire a destroy beam — freeze ring, beam handles timing
         destroyBeamRenderer.addBeam(
           lifecycle.requestedBy,
           lifecycle.name || lifecycle.agentId,
           agentRing
         );
-      }
-
-      agentRing.updateState({
-        agentId: lifecycle.agentId,
-        phase: 'stopped',
-        activity: 'completed',
-      });
-      // Delay the actual removal so the beam animation has time to show
-      if (lifecycle.requestedBy) {
+        // Set stopping state immediately (visual badge only)
+        agentRing.updateState({
+          agentId: lifecycle.agentId,
+          phase: 'stopping',
+          activity: 'executing',
+        });
+        // Remove agent when beam arrives (charge 300 + travel 400 = 700ms)
         setTimeout(() => {
+          agentRing.updateState({
+            agentId: lifecycle.agentId,
+            phase: 'stopped',
+            activity: 'completed',
+          });
           agentRing.removeAgent(lifecycle.agentId);
-        }, 800);
+        }, 700);
       } else {
+        agentRing.updateState({
+          agentId: lifecycle.agentId,
+          phase: 'stopped',
+          activity: 'completed',
+        });
         agentRing.removeAgent(lifecycle.agentId);
       }
       break;
