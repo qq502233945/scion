@@ -143,6 +143,50 @@ func TestComputeCapabilitiesBatch_MixedOwnership(t *testing.T) {
 	assert.Equal(t, []string{"read"}, caps[1].Actions)
 }
 
+func TestComputeCapabilities_AncestorGetsAllActions(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.CreateUser(ctx, &store.User{
+		ID: "user-ancestor-cap", Email: "ancestor-cap@test.com", DisplayName: "Ancestor", Role: "member", Status: "active",
+	}))
+
+	user := NewAuthenticatedUser("user-ancestor-cap", "ancestor-cap@test.com", "Ancestor", "member", "api")
+	resource := Resource{
+		Type:     "agent",
+		ID:       "agent-descendant",
+		OwnerID:  "someone-else",
+		Ancestry: []string{"user-ancestor-cap", "agent-middle"},
+	}
+
+	caps := srv.authzService.ComputeCapabilities(ctx, user, resource)
+	assert.Equal(t, []string{"read", "update", "delete", "start", "stop", "message", "attach"}, caps.Actions)
+}
+
+func TestComputeCapabilitiesBatch_AncestryAccess(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.CreateUser(ctx, &store.User{
+		ID: "user-batch-ancestor", Email: "batch-ancestor@test.com", DisplayName: "BatchAnc", Role: "member", Status: "active",
+	}))
+
+	user := NewAuthenticatedUser("user-batch-ancestor", "batch-ancestor@test.com", "BatchAnc", "member", "api")
+	resources := []Resource{
+		{Type: "agent", ID: "agent-descendant-1", OwnerID: "other", Ancestry: []string{"user-batch-ancestor", "agent-A"}},
+		{Type: "agent", ID: "agent-unrelated", OwnerID: "other", Ancestry: []string{"other-user"}},
+	}
+
+	caps := srv.authzService.ComputeCapabilitiesBatch(ctx, user, resources, "agent")
+	require.Len(t, caps, 2)
+
+	// Descendant gets all actions via ancestry
+	assert.Equal(t, []string{"read", "update", "delete", "start", "stop", "message", "attach"}, caps[0].Actions)
+
+	// Unrelated agent gets empty (no policy, not owner, not ancestor)
+	assert.Equal(t, []string{}, caps[1].Actions)
+}
+
 func TestComputeScopeCapabilities(t *testing.T) {
 	srv, _ := testServer(t)
 	ctx := context.Background()
@@ -268,7 +312,7 @@ func TestComputeCapabilitiesBatch_EmptyList(t *testing.T) {
 
 func TestResourceBuilders(t *testing.T) {
 	t.Run("agentResource", func(t *testing.T) {
-		a := &store.Agent{ID: "a1", OwnerID: "u1", GroveID: "g1", Labels: map[string]string{"env": "prod"}}
+		a := &store.Agent{ID: "a1", OwnerID: "u1", GroveID: "g1", Labels: map[string]string{"env": "prod"}, Ancestry: []string{"u1"}}
 		r := agentResource(a)
 		assert.Equal(t, "agent", r.Type)
 		assert.Equal(t, "a1", r.ID)
@@ -276,6 +320,7 @@ func TestResourceBuilders(t *testing.T) {
 		assert.Equal(t, "grove", r.ParentType)
 		assert.Equal(t, "g1", r.ParentID)
 		assert.Equal(t, "prod", r.Labels["env"])
+		assert.Equal(t, []string{"u1"}, r.Ancestry)
 	})
 
 	t.Run("groveResource", func(t *testing.T) {

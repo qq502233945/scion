@@ -216,6 +216,11 @@ func (a *AuthzService) ComputeCapabilitiesBatch(ctx context.Context, identity Id
 			caps[i] = allActions(actions)
 			continue
 		}
+		// Ancestry short-circuit: ancestors get full access
+		if canAccessAsAncestor(identity.ID(), resource) {
+			caps[i] = allActions(actions)
+			continue
+		}
 
 		var allowed []string
 		for _, action := range actions {
@@ -272,6 +277,11 @@ func (a *AuthzService) checkAccessPrecomputed(identity Identity, _ []store.Princ
 		if resource.OwnerID != "" && resource.OwnerID == user.ID() {
 			return Decision{Allowed: true, Reason: "resource owner"}
 		}
+	}
+
+	// Ancestry bypass (already handled in batch caller, but kept for single-resource calls)
+	if canAccessAsAncestor(identity.ID(), resource) {
+		return Decision{Allowed: true, Reason: "ancestor access"}
 	}
 
 	return a.evaluatePolicies(policies, resource, action)
