@@ -160,7 +160,7 @@ type Grove struct {
 	Slug string `json:"slug"` // URL-safe identifier
 
 	// Git integration
-	GitRemote string `json:"gitRemote,omitempty"` // Normalized git remote URL (unique)
+	GitRemote string `json:"gitRemote,omitempty"` // Normalized git remote URL (multiple groves may share the same remote)
 
 	// Runtime broker configuration
 	// DefaultRuntimeBrokerID is the runtime broker used when creating agents without

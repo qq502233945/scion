@@ -105,6 +105,23 @@ func SlugifyWithSuffix(s, suffix string) string {
 	return slug + "-" + suffix
 }
 
+// DisplayNameWithSerial returns a display name with a parenthesized serial
+// qualifier when the slug has a serial suffix. For example, if baseName is
+// "acme-widgets" and slug is "acme-widgets-2", returns "acme-widgets (2)".
+// If the slug matches the base slug (no serial suffix), returns baseName as-is.
+func DisplayNameWithSerial(baseName, slug, baseSlug string) string {
+	if slug == baseSlug {
+		return baseName
+	}
+	// Extract the serial number from the slug suffix
+	prefix := baseSlug + "-"
+	if strings.HasPrefix(slug, prefix) {
+		serial := slug[len(prefix):]
+		return fmt.Sprintf("%s (%s)", baseName, serial)
+	}
+	return baseName
+}
+
 // NewUUID generates a new UUID string.
 func NewUUID() string {
 	return uuid.New().String()

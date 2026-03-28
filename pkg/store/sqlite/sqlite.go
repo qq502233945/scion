@@ -115,6 +115,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV37,
 		migrationV38,
 		migrationV39,
+		migrationV40,
 	}
 
 	// Create migrations table if not exists
@@ -889,6 +890,51 @@ CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id, read
 CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
+`
+
+// Migration V40: Allow multiple groves per git remote (drop UNIQUE on git_remote),
+// and enforce slug uniqueness (add UNIQUE on slug). Requires table recreation
+// because SQLite does not support ALTER TABLE DROP CONSTRAINT.
+const migrationV40 = `
+PRAGMA foreign_keys=OFF;
+
+CREATE TABLE groves_new (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	git_remote TEXT,
+	labels TEXT,
+	annotations TEXT,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_by TEXT,
+	owner_id TEXT,
+	visibility TEXT NOT NULL DEFAULT 'private',
+	default_runtime_broker_id TEXT REFERENCES runtime_brokers(id) ON DELETE SET NULL,
+	shared_dirs TEXT,
+	github_installation_id INTEGER REFERENCES github_installations(installation_id),
+	github_permissions TEXT,
+	github_app_status TEXT,
+	git_identity TEXT
+);
+
+INSERT INTO groves_new SELECT
+	id, name, slug, git_remote, labels, annotations,
+	created_at, updated_at, created_by, owner_id, visibility,
+	default_runtime_broker_id, shared_dirs,
+	github_installation_id, github_permissions, github_app_status,
+	git_identity
+FROM groves;
+
+DROP TABLE groves;
+ALTER TABLE groves_new RENAME TO groves;
+
+CREATE INDEX IF NOT EXISTS idx_groves_slug ON groves(slug);
+CREATE INDEX IF NOT EXISTS idx_groves_git_remote ON groves(git_remote);
+CREATE INDEX IF NOT EXISTS idx_groves_owner ON groves(owner_id);
+CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_broker ON groves(default_runtime_broker_id);
+
+PRAGMA foreign_keys=ON;
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -1772,16 +1818,60 @@ func (s *SQLiteStore) GetGroveBySlugCaseInsensitive(ctx context.Context, slug st
 	return s.GetGrove(ctx, id)
 }
 
-func (s *SQLiteStore) GetGroveByGitRemote(ctx context.Context, gitRemote string) (*store.Grove, error) {
-	var id string
-	err := s.db.QueryRowContext(ctx, "SELECT id FROM groves WHERE git_remote = ?", gitRemote).Scan(&id)
+func (s *SQLiteStore) GetGrovesByGitRemote(ctx context.Context, gitRemote string) ([]*store.Grove, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT id FROM groves WHERE git_remote = ? ORDER BY created_at ASC", gitRemote)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
 		return nil, err
 	}
-	return s.GetGrove(ctx, id)
+
+	// Collect all IDs first, then close the cursor before calling GetGrove
+	// (SQLite single-connection can't serve a new query while rows are open).
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	groves := make([]*store.Grove, 0, len(ids))
+	for _, id := range ids {
+		grove, err := s.GetGrove(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		groves = append(groves, grove)
+	}
+	return groves, nil
+}
+
+func (s *SQLiteStore) NextAvailableSlug(ctx context.Context, baseSlug string) (string, error) {
+	// Check if the base slug is available
+	var count int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM groves WHERE slug = ?", baseSlug).Scan(&count); err != nil {
+		return "", err
+	}
+	if count == 0 {
+		return baseSlug, nil
+	}
+
+	// Find the next available serial suffix
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", baseSlug, i)
+		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM groves WHERE slug = ?", candidate).Scan(&count); err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return candidate, nil
+		}
+	}
 }
 
 func (s *SQLiteStore) UpdateGrove(ctx context.Context, grove *store.Grove) error {

@@ -175,8 +175,11 @@ func (m *mockGroveStore) GetGroveBySlug(context.Context, string) (*store.Grove, 
 func (m *mockGroveStore) GetGroveBySlugCaseInsensitive(context.Context, string) (*store.Grove, error) {
 	return nil, store.ErrNotFound
 }
-func (m *mockGroveStore) GetGroveByGitRemote(context.Context, string) (*store.Grove, error) {
-	return nil, store.ErrNotFound
+func (m *mockGroveStore) GetGrovesByGitRemote(context.Context, string) ([]*store.Grove, error) {
+	return []*store.Grove{}, nil
+}
+func (m *mockGroveStore) NextAvailableSlug(_ context.Context, baseSlug string) (string, error) {
+	return baseSlug, nil
 }
 func (m *mockGroveStore) ListGroves(context.Context, store.GroveFilter, store.ListOptions) (*store.ListResult[store.Grove], error) {
 	return nil, nil

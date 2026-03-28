@@ -187,7 +187,7 @@ type AgentStatusUpdate struct {
 // GroveStore defines grove-related persistence operations.
 type GroveStore interface {
 	// CreateGrove creates a new grove record.
-	// Returns ErrAlreadyExists if a grove with the same git remote exists.
+	// Returns ErrAlreadyExists if a grove with the same slug exists.
 	CreateGrove(ctx context.Context, grove *Grove) error
 
 	// GetGrove retrieves a grove by ID.
@@ -203,9 +203,14 @@ type GroveStore interface {
 	// Returns ErrNotFound if the grove doesn't exist.
 	GetGroveBySlugCaseInsensitive(ctx context.Context, slug string) (*Grove, error)
 
-	// GetGroveByGitRemote retrieves a grove by its normalized git remote URL.
-	// Returns ErrNotFound if the grove doesn't exist.
-	GetGroveByGitRemote(ctx context.Context, gitRemote string) (*Grove, error)
+	// GetGrovesByGitRemote returns all groves matching the normalized git remote URL.
+	// Returns an empty slice (not error) if none found.
+	GetGrovesByGitRemote(ctx context.Context, gitRemote string) ([]*Grove, error)
+
+	// NextAvailableSlug returns the next available slug given a base slug.
+	// If baseSlug is available, it is returned as-is. Otherwise, serial
+	// suffixes are tried: baseSlug-1, baseSlug-2, etc.
+	NextAvailableSlug(ctx context.Context, baseSlug string) (string, error)
 
 	// UpdateGrove updates an existing grove.
 	// Returns ErrNotFound if the grove doesn't exist.
@@ -929,6 +934,11 @@ type GitHubInstallationStore interface {
 
 	// ListGitHubInstallations returns all GitHub App installations matching the filter.
 	ListGitHubInstallations(ctx context.Context, filter GitHubInstallationFilter) ([]GitHubInstallation, error)
+
+	// GetInstallationForRepository returns an active GitHub App installation
+	// that covers the given repository (owner/repo format).
+	// Returns ErrNotFound if no matching active installation exists.
+	GetInstallationForRepository(ctx context.Context, repoFullName string) (*GitHubInstallation, error)
 }
 
 // GitHubInstallationFilter defines criteria for filtering GitHub App installations.

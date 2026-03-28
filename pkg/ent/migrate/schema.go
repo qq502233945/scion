@@ -163,7 +163,7 @@ var (
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "name", Type: field.TypeString},
 		{Name: "slug", Type: field.TypeString, Unique: true},
-		{Name: "git_remote", Type: field.TypeString, Unique: true, Nullable: true},
+		{Name: "git_remote", Type: field.TypeString, Nullable: true},
 		{Name: "labels", Type: field.TypeJSON, Nullable: true},
 		{Name: "annotations", Type: field.TypeJSON, Nullable: true},
 		{Name: "created", Type: field.TypeTime},

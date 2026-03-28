@@ -43,7 +43,6 @@ func (Grove) Fields() []ent.Field {
 			NotEmpty(),
 		field.String("git_remote").
 			Optional().
-			Unique().
 			Nillable(),
 		field.JSON("labels", map[string]string{}).
 			Optional(),

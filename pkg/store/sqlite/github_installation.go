@@ -109,6 +109,25 @@ func (s *SQLiteStore) DeleteGitHubInstallation(ctx context.Context, installation
 	return nil
 }
 
+func (s *SQLiteStore) GetInstallationForRepository(ctx context.Context, repoFullName string) (*store.GitHubInstallation, error) {
+	// Search active installations whose repositories JSON array contains the repo.
+	installations, err := s.ListGitHubInstallations(ctx, store.GitHubInstallationFilter{
+		Status: store.GitHubInstallationStatusActive,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range installations {
+		for _, repo := range installations[i].Repositories {
+			if repo == repoFullName {
+				return &installations[i], nil
+			}
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (s *SQLiteStore) ListGitHubInstallations(ctx context.Context, filter store.GitHubInstallationFilter) ([]store.GitHubInstallation, error) {
 	query := "SELECT installation_id, account_login, account_type, app_id, repositories, status, created_at, updated_at FROM github_installations WHERE 1=1"
 	var args []interface{}

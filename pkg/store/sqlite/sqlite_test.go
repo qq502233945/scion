@@ -18,6 +18,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -661,12 +662,13 @@ func TestGroveCRUD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, grove.ID, retrieved.ID)
 
-	// Get by git remote
-	retrieved, err = s.GetGroveByGitRemote(ctx, "github.com/org/repo")
+	// Get by git remote (plural)
+	groves, err := s.GetGrovesByGitRemote(ctx, "github.com/org/repo")
 	require.NoError(t, err)
-	assert.Equal(t, grove.ID, retrieved.ID)
+	require.Len(t, groves, 1)
+	assert.Equal(t, grove.ID, groves[0].ID)
 
-	// Test unique constraint on git remote
+	// Duplicate git remotes are now allowed (slug must still be unique)
 	duplicate := &store.Grove{
 		ID:         api.NewUUID(),
 		Name:       "Duplicate",
@@ -675,7 +677,12 @@ func TestGroveCRUD(t *testing.T) {
 		Visibility: store.VisibilityPrivate,
 	}
 	err = s.CreateGrove(ctx, duplicate)
-	assert.ErrorIs(t, err, store.ErrAlreadyExists)
+	require.NoError(t, err)
+
+	// Verify both groves are returned
+	groves, err = s.GetGrovesByGitRemote(ctx, "github.com/org/repo")
+	require.NoError(t, err)
+	assert.Len(t, groves, 2)
 
 	// Update grove
 	retrieved.Name = "Updated Project"
@@ -694,6 +701,142 @@ func TestGroveCRUD(t *testing.T) {
 	// Verify deleted
 	_, err = s.GetGrove(ctx, grove.ID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestMultiGrovePerGitRemote(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	remote := "github.com/acme/widgets"
+
+	// Create 3 groves with the same git remote but different slugs
+	slugs := []string{"acme-widgets", "acme-widgets-1", "acme-widgets-2"}
+	for i, slug := range slugs {
+		grove := &store.Grove{
+			ID:         api.NewUUID(),
+			Name:       fmt.Sprintf("acme-widgets grove %d", i),
+			Slug:       slug,
+			GitRemote:  remote,
+			Visibility: store.VisibilityPrivate,
+		}
+		require.NoError(t, s.CreateGrove(ctx, grove))
+	}
+
+	groves, err := s.GetGrovesByGitRemote(ctx, remote)
+	require.NoError(t, err)
+	assert.Len(t, groves, 3)
+
+	// Verify ordering is by created_at ASC
+	assert.Equal(t, "acme-widgets", groves[0].Slug)
+	assert.Equal(t, "acme-widgets-1", groves[1].Slug)
+	assert.Equal(t, "acme-widgets-2", groves[2].Slug)
+}
+
+func TestGetGrovesByGitRemoteEmpty(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	groves, err := s.GetGrovesByGitRemote(ctx, "github.com/nonexistent/repo")
+	require.NoError(t, err)
+	assert.Empty(t, groves)
+}
+
+func TestSlugUniqueness(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	grove1 := &store.Grove{
+		ID: api.NewUUID(), Name: "Test", Slug: "test-grove",
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove1))
+
+	// Duplicate slug should fail
+	grove2 := &store.Grove{
+		ID: api.NewUUID(), Name: "Test 2", Slug: "test-grove",
+		Visibility: store.VisibilityPrivate,
+	}
+	err := s.CreateGrove(ctx, grove2)
+	assert.ErrorIs(t, err, store.ErrAlreadyExists)
+}
+
+func TestNextAvailableSlug(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Base slug available
+	slug, err := s.NextAvailableSlug(ctx, "acme-widgets")
+	require.NoError(t, err)
+	assert.Equal(t, "acme-widgets", slug)
+
+	// Create the base slug
+	require.NoError(t, s.CreateGrove(ctx, &store.Grove{
+		ID: api.NewUUID(), Name: "acme-widgets", Slug: "acme-widgets",
+		Visibility: store.VisibilityPrivate,
+	}))
+
+	// Should get -1
+	slug, err = s.NextAvailableSlug(ctx, "acme-widgets")
+	require.NoError(t, err)
+	assert.Equal(t, "acme-widgets-1", slug)
+
+	// Create -1
+	require.NoError(t, s.CreateGrove(ctx, &store.Grove{
+		ID: api.NewUUID(), Name: "acme-widgets (1)", Slug: "acme-widgets-1",
+		Visibility: store.VisibilityPrivate,
+	}))
+
+	// Should get -2
+	slug, err = s.NextAvailableSlug(ctx, "acme-widgets")
+	require.NoError(t, err)
+	assert.Equal(t, "acme-widgets-2", slug)
+}
+
+func TestGetInstallationForRepository(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Create an installation with repos
+	inst := &store.GitHubInstallation{
+		InstallationID: 12345,
+		AccountLogin:   "acme",
+		AccountType:    "Organization",
+		AppID:          100,
+		Repositories:   []string{"acme/widgets", "acme/gizmos"},
+		Status:         store.GitHubInstallationStatusActive,
+	}
+	require.NoError(t, s.CreateGitHubInstallation(ctx, inst))
+
+	// Look up by repo
+	found, err := s.GetInstallationForRepository(ctx, "acme/widgets")
+	require.NoError(t, err)
+	assert.Equal(t, int64(12345), found.InstallationID)
+	assert.Contains(t, found.Repositories, "acme/widgets")
+
+	// Look up non-existent repo
+	_, err = s.GetInstallationForRepository(ctx, "acme/nonexistent")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// Suspended installation should not match
+	inst2 := &store.GitHubInstallation{
+		InstallationID: 67890,
+		AccountLogin:   "other",
+		AccountType:    "User",
+		AppID:          100,
+		Repositories:   []string{"other/project"},
+		Status:         store.GitHubInstallationStatusSuspended,
+	}
+	require.NoError(t, s.CreateGitHubInstallation(ctx, inst2))
+
+	_, err = s.GetInstallationForRepository(ctx, "other/project")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestDisplayNameWithSerial(t *testing.T) {
+	assert.Equal(t, "acme-widgets", api.DisplayNameWithSerial("acme-widgets", "acme-widgets", "acme-widgets"))
+	assert.Equal(t, "acme-widgets (1)", api.DisplayNameWithSerial("acme-widgets", "acme-widgets-1", "acme-widgets"))
+	assert.Equal(t, "acme-widgets (2)", api.DisplayNameWithSerial("acme-widgets", "acme-widgets-2", "acme-widgets"))
+	assert.Equal(t, "My Project (3)", api.DisplayNameWithSerial("My Project", "my-project-3", "my-project"))
 }
 
 func TestGroveList(t *testing.T) {

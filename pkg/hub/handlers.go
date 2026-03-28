@@ -3183,14 +3183,18 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 
 	// If not found by ID, try git remote lookup
 	if grove == nil && normalizedRemote != "" {
-		// For groves with git remote, look up by git remote (exact match)
-		existingGrove, err := s.store.GetGroveByGitRemote(ctx, normalizedRemote)
-		if err == nil {
-			grove = existingGrove
-		} else if err != store.ErrNotFound {
+		// For groves with git remote, look up by git remote (may return multiple)
+		matchingGroves, err := s.store.GetGrovesByGitRemote(ctx, normalizedRemote)
+		if err != nil {
 			writeErrorFromErr(w, err, "")
 			return
 		}
+		if len(matchingGroves) == 1 {
+			// Backward compatible: single match auto-links
+			grove = matchingGroves[0]
+		}
+		// When multiple matches exist, grove remains nil and a new one is created.
+		// Phase 3 will add disambiguation support via the response matches field.
 	}
 
 	// If still not found and no git remote, try by slug (for global groves)
@@ -8082,13 +8086,19 @@ func (s *Server) handleGroveSyncTemplates(w http.ResponseWriter, r *http.Request
 			Depth:  1,
 		}
 
-		// Look up a git-based grove for the same repo that has a GitHub App
-		// installation. If the source grove has the same owner, the dispatcher
-		// can mint a token using that installation for cloning.
+		// Look up a GitHub App installation that covers this repo directly,
+		// then find a grove owned by the same user that references it so the
+		// dispatcher can mint a token for cloning.
 		normalizedRemote := util.NormalizeGitRemote(cleanedURL)
-		if sourceGrove, err := s.store.GetGroveByGitRemote(ctx, normalizedRemote); err == nil {
-			if sourceGrove.GitHubInstallationID != nil && sourceGrove.OwnerID == grove.OwnerID {
-				agent.Labels["scion.dev/github-token-source-grove"] = sourceGrove.ID
+		if parts := strings.SplitN(normalizedRemote, "/", 2); len(parts) == 2 {
+			if inst, err := s.store.GetInstallationForRepository(ctx, parts[1]); err == nil {
+				matchingGroves, _ := s.store.GetGrovesByGitRemote(ctx, normalizedRemote)
+				for _, g := range matchingGroves {
+					if g.GitHubInstallationID != nil && *g.GitHubInstallationID == inst.InstallationID && g.OwnerID == grove.OwnerID {
+						agent.Labels["scion.dev/github-token-source-grove"] = g.ID
+						break
+					}
+				}
 			}
 		}
 	}
