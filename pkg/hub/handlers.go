@@ -6022,6 +6022,7 @@ func metaToStoreSecret(m secret.SecretMeta) store.Secret {
 	return store.Secret{
 		ID:            m.ID,
 		Key:           m.Name,
+		SecretRef:     m.SecretRef,
 		SecretType:    m.SecretType,
 		Target:        m.Target,
 		Scope:         m.Scope,

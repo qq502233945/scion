@@ -429,6 +429,9 @@ func runSecretGet(cmd *cobra.Command, args []string) error {
 		if secret.Target != "" && secret.Target != secret.Key {
 			fmt.Printf("  Target:  %s\n", secret.Target)
 		}
+		if secret.SecretRef != "" {
+			fmt.Printf("  Ref:     %s\n", secret.SecretRef)
+		}
 		fmt.Printf("  Version: %d\n", secret.Version)
 		fmt.Printf("  Created: %s\n", secret.Created.Format(time.RFC3339))
 		fmt.Printf("  Updated: %s\n", secret.Updated.Format(time.RFC3339))
