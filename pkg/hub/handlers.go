@@ -611,7 +611,10 @@ func (s *Server) createAgentInGrove(
 
 	agent.AppliedConfig = s.buildAppliedConfig(req, harnessConfig, creatorName)
 
-	// Populate GCP identity in applied config
+	// Populate GCP identity in applied config.
+	// Default to "block" mode when no GCP identity is specified, so agents
+	// cannot access the underlying compute identity via the GCE metadata
+	// server unless explicitly opted into "passthrough" or "assign".
 	if req.GCPIdentity != nil {
 		switch req.GCPIdentity.MetadataMode {
 		case store.GCPMetadataModeAssign:
@@ -629,6 +632,12 @@ func (s *Server) createAgentInGrove(
 			agent.AppliedConfig.GCPIdentity = &store.GCPIdentityConfig{
 				MetadataMode: store.GCPMetadataModeBlock,
 			}
+		}
+	} else {
+		// No GCP identity specified — default to block to prevent leaking
+		// the host compute identity to agents.
+		agent.AppliedConfig.GCPIdentity = &store.GCPIdentityConfig{
+			MetadataMode: store.GCPMetadataModeBlock,
 		}
 	}
 
