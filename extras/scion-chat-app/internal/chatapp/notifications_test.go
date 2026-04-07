@@ -146,4 +146,14 @@ func TestHandleUserMessage_NoSubscriptionRequired(t *testing.T) {
 	if got.card.Header.Title != "Message from simon" {
 		t.Errorf("unexpected card title: %q", got.card.Header.Title)
 	}
+
+	// The card should @mention the recipient (no "To:" field)
+	lastSection := got.card.Sections[len(got.card.Sections)-1]
+	if len(lastSection.Widgets) == 0 {
+		t.Fatal("expected a mention widget in the last section")
+	}
+	mentionText := lastSection.Widgets[0].Content
+	if mentionText != "<users/12345>" {
+		t.Errorf("expected recipient @mention, got %q", mentionText)
+	}
 }

@@ -167,16 +167,21 @@ func (n *NotificationRelay) handleUserMessage(ctx context.Context, groveID strin
 						{Type: WidgetText, Content: msg.Msg},
 					},
 				},
-				{
-					Widgets: []Widget{
-						{Type: WidgetText, Content: fmt.Sprintf("To: <users/%s>", mapping.PlatformUserID)},
-					},
-				},
 			},
 			Actions: []CardAction{
 				{Label: "Reply", ActionID: fmt.Sprintf("agent.respond.%s", agentSlug)},
 				{Label: "View Logs", ActionID: fmt.Sprintf("agent.logs.%s", agentSlug)},
 			},
+		}
+
+		// Build @mentions: always include the direct recipient, plus any subscribers
+		mentions := n.buildMentions(mapping.PlatformUserID, agentSlug, link)
+		if mentions != "" {
+			card.Sections = append(card.Sections, CardSection{
+				Widgets: []Widget{
+					{Type: WidgetText, Content: mentions},
+				},
+			})
 		}
 
 		if _, err := n.messenger.SendCard(ctx, link.SpaceID, card); err != nil {
@@ -349,4 +354,30 @@ func (n *NotificationRelay) getSubscriberMentions(msg *messages.StructuredMessag
 		return ""
 	}
 	return "CC: " + strings.Join(mentions, " ")
+}
+
+// buildMentions returns a formatted @mention string for a user-targeted message.
+// It always includes the direct recipient and appends any subscribers to the
+// agent in that space, deduplicating against the recipient.
+func (n *NotificationRelay) buildMentions(recipientPlatformID, agentSlug string, link state.SpaceLink) string {
+	// Start with the direct recipient
+	seen := map[string]bool{recipientPlatformID: true}
+	mentions := []string{fmt.Sprintf("<%s>", recipientPlatformID)}
+
+	// Add subscribers for this agent/grove, skipping the recipient to avoid duplication
+	subs, err := n.store.ListAgentSubscriptions(agentSlug, link.GroveID)
+	if err != nil {
+		n.log.Error("listing agent subscriptions for mentions", "error", err)
+		return strings.Join(mentions, " ")
+	}
+
+	for _, sub := range subs {
+		if sub.Platform != link.Platform || seen[sub.PlatformUserID] {
+			continue
+		}
+		seen[sub.PlatformUserID] = true
+		mentions = append(mentions, fmt.Sprintf("<users/%s>", sub.PlatformUserID))
+	}
+
+	return strings.Join(mentions, " ")
 }
