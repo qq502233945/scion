@@ -5,7 +5,7 @@ An example [ADK (Agent Development Kit)](https://google.github.io/adk-docs/) age
 ## Prerequisites
 
 - Python 3.11+
-- `google-adk>=1.28.0` (see `requirements.txt`; install with `pip install -r requirements.txt`)
+- `google-adk` from git HEAD (see `requirements.txt`; install with `pip install -r requirements.txt`). The `EnvironmentToolset` used by this agent is not yet in a released PyPI version.
 - A Google AI API key or Vertex AI credentials
 
 ## Quick Start (Standalone)

@@ -36,8 +36,9 @@ USER root
 RUN mkdir -p /workspace && chown scion:scion /workspace
 WORKDIR /workspace
 
-# Install Python dependencies into a virtualenv so we get a clean pip
-# environment without conflicting with system packages.
+# Install google-adk from source — the EnvironmentToolset and
+# LocalEnvironment used by this agent are not yet in the released
+# PyPI package.  Install from git HEAD until a release includes them.
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/adk-venv && \
     /opt/adk-venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
