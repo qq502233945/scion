@@ -12,8 +12,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Allow running as `python -m adk_scion_agent`."""
+"""Allow running as `python -m adk_scion_agent`.
 
-from .run import main
+Wraps the real entry point with crash reporting so that import errors
+and early startup failures are written to agent-info.json (readable by
+scion) and to stderr (visible if the tmux pane is captured).
+"""
 
-main()
+import json
+import os
+import sys
+import traceback
+
+
+def _report_crash(message: str) -> None:
+    """Write crash details to agent-info.json and stderr."""
+    print(message, file=sys.stderr, flush=True)
+    try:
+        info_path = os.path.join(
+            os.environ.get("HOME", "/home/scion"), "agent-info.json"
+        )
+        with open(info_path, "w") as f:
+            json.dump({"activity": "error", "error": message}, f)
+    except Exception:
+        pass
+
+
+try:
+    from .run import main
+except Exception:
+    _report_crash(
+        f"[adk_scion_agent] Failed to import agent modules:\n"
+        f"{traceback.format_exc()}"
+    )
+    sys.exit(1)
+
+try:
+    main()
+except Exception:
+    _report_crash(
+        f"[adk_scion_agent] Agent crashed:\n"
+        f"{traceback.format_exc()}"
+    )
+    sys.exit(1)

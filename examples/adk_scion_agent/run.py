@@ -32,23 +32,29 @@ Usage (container CMD):
 
 import argparse
 import asyncio
+import sys
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from .agent import root_agent
 
+print("[adk_scion_agent] Modules imported successfully", file=sys.stderr, flush=True)
 
 APP_NAME = "adk_scion_agent"
 USER_ID = "scion_user"
 
 
 async def _run(initial_message: str | None) -> None:
+    print("[adk_scion_agent] Creating InMemoryRunner...", file=sys.stderr, flush=True)
     runner = InMemoryRunner(agent=root_agent, app_name=APP_NAME)
 
+    print("[adk_scion_agent] Creating session...", file=sys.stderr, flush=True)
     session = await runner.session_service.create_session(
         app_name=APP_NAME, user_id=USER_ID
     )
+    print("[adk_scion_agent] Session created, entering interactive loop",
+          file=sys.stderr, flush=True)
 
     async def send(text: str) -> None:
         content = types.Content(role="user", parts=[types.Part(text=text)])

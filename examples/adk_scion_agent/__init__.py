@@ -12,4 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .agent import root_agent
+def __getattr__(name):
+    """Lazy import so that startup errors can be caught by __main__.py."""
+    if name == "root_agent":
+        from .agent import root_agent
+
+        return root_agent
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
