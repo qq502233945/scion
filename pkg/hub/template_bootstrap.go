@@ -313,8 +313,17 @@ func (s *Server) importTemplatesFromRemote(ctx context.Context, groveID, sourceU
 		return nil, fmt.Errorf("template storage is not configured")
 	}
 
+	// If the grove has a GitHub App installation, mint a token for authenticated access
+	var authToken string
+	grove, err := s.store.GetGrove(ctx, groveID)
+	if err == nil && grove != nil && grove.GitHubInstallationID != nil {
+		if token, _, mintErr := s.MintGitHubAppTokenForGrove(ctx, grove); mintErr == nil && token != "" {
+			authToken = token
+		}
+	}
+
 	// Fetch to a temporary directory
-	cachePath, err := config.FetchRemoteTemplate(ctx, sourceURL)
+	cachePath, err := config.FetchRemoteTemplate(ctx, sourceURL, authToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch remote templates: %w", err)
 	}

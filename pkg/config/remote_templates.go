@@ -157,7 +157,13 @@ func isArchiveURL(uri string) bool {
 
 // FetchRemoteTemplate fetches a template from a remote URI and caches it locally.
 // Returns the local path to the cached template.
-func FetchRemoteTemplate(ctx context.Context, uri string) (string, error) {
+// An optional authToken can be provided for authenticated GitHub access (e.g.
+// a GitHub App installation token). Pass "" when no auth is needed.
+func FetchRemoteTemplate(ctx context.Context, uri string, authToken ...string) (string, error) {
+	token := ""
+	if len(authToken) > 0 {
+		token = authToken[0]
+	}
 	cacheDir, err := remoteCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get cache directory: %w", err)
@@ -179,7 +185,7 @@ func FetchRemoteTemplate(ctx context.Context, uri string) (string, error) {
 
 	switch remoteType {
 	case RemoteTypeGitHub:
-		if err := fetchGitHubFolder(ctx, uri, templateCachePath); err != nil {
+		if err := fetchGitHubFolder(ctx, uri, templateCachePath, token); err != nil {
 			return "", fmt.Errorf("failed to fetch GitHub folder: %w", err)
 		}
 	case RemoteTypeArchive:
@@ -205,25 +211,27 @@ func generateCacheKey(uri string) string {
 
 // fetchGitHubFolder fetches a folder from a GitHub repository.
 // Uses the GitHub tarball API (plain HTTPS, no git binary required),
-// with a fallback to sparse git checkout.
-func fetchGitHubFolder(ctx context.Context, uri string, destPath string) error {
+// with a fallback to sparse git checkout. When token is non-empty it is
+// used for authentication (e.g. a GitHub App installation token).
+func fetchGitHubFolder(ctx context.Context, uri string, destPath string, token string) error {
 	parsed, err := parseGitHubURL(uri)
 	if err != nil {
 		return err
 	}
 
 	// Try GitHub tarball download first (works without git installed)
-	if err := fetchGitHubTarball(ctx, parsed, destPath); err == nil {
+	if err := fetchGitHubTarball(ctx, parsed, destPath, token); err == nil {
 		return nil
 	}
 
 	// Fall back to sparse git checkout
-	return sparseGitCheckout(ctx, parsed, destPath)
+	return sparseGitCheckout(ctx, parsed, destPath, token)
 }
 
 // fetchGitHubTarball downloads the repo tarball from GitHub and extracts the
 // desired sub-path. This uses plain HTTPS and does not require git or svn.
-func fetchGitHubTarball(ctx context.Context, parts *GitHubURLParts, destPath string) error {
+// When token is non-empty it is sent as a Bearer authorization header.
+func fetchGitHubTarball(ctx context.Context, parts *GitHubURLParts, destPath string, token string) error {
 	branch := parts.Branch
 	if branch == "" {
 		branch = "main"
@@ -235,6 +243,9 @@ func fetchGitHubTarball(ctx context.Context, parts *GitHubURLParts, destPath str
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tarballURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -343,7 +354,8 @@ func parseGitHubURL(uri string) (*GitHubURLParts, error) {
 }
 
 // sparseGitCheckout performs a sparse git checkout to get only the needed folder.
-func sparseGitCheckout(ctx context.Context, parts *GitHubURLParts, destPath string) error {
+// When token is non-empty it is embedded in the remote URL for authentication.
+func sparseGitCheckout(ctx context.Context, parts *GitHubURLParts, destPath string, token string) error {
 	// Create a temporary directory for the git clone
 	tmpDir, err := os.MkdirTemp("", "scion-git-sparse-*")
 	if err != nil {
@@ -351,7 +363,12 @@ func sparseGitCheckout(ctx context.Context, parts *GitHubURLParts, destPath stri
 	}
 	defer os.RemoveAll(tmpDir)
 
-	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", parts.Owner, parts.Repo)
+	var repoURL string
+	if token != "" {
+		repoURL = fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, parts.Owner, parts.Repo)
+	} else {
+		repoURL = fmt.Sprintf("https://github.com/%s/%s.git", parts.Owner, parts.Repo)
+	}
 
 	// Initialize git repo with sparse checkout
 	commands := [][]string{
