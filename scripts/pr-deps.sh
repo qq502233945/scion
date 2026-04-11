@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,6 +38,13 @@
 #
 
 set -euo pipefail
+
+# Require bash 4+ for associative arrays
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    echo "Error: bash 4+ is required (found bash ${BASH_VERSION})." >&2
+    echo "On macOS, install via: brew install bash" >&2
+    exit 1
+fi
 
 # --- Colors ---
 RED='\033[0;31m'
