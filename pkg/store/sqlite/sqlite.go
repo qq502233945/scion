@@ -1742,7 +1742,7 @@ func (s *SQLiteStore) MarkStalledAgents(ctx context.Context, activityThreshold, 
 	// - Have a stale last_activity_event (older than activityThreshold)
 	// - Have a recent heartbeat (last_seen >= heartbeatRecency) — process is alive
 	// - Are in the running phase
-	// - Are not already in a terminal/sticky activity or already stalled/offline
+	// - Are not already in a terminal/sticky/waiting activity or already stalled/offline
 	_, err = tx.ExecContext(ctx, `
 		UPDATE agents SET
 			stalled_from_activity = activity,
@@ -1753,7 +1753,7 @@ func (s *SQLiteStore) MarkStalledAgents(ctx context.Context, activityThreshold, 
 		  AND last_seen >= ?
 		  AND last_seen IS NOT NULL
 		  AND phase = 'running'
-		  AND activity NOT IN ('completed', 'limits_exceeded', 'blocked', 'stalled', 'offline')
+		  AND activity NOT IN ('completed', 'limits_exceeded', 'blocked', 'stalled', 'offline', 'idle', 'waiting_for_input')
 	`, now, activityThreshold, heartbeatRecency)
 	if err != nil {
 		return nil, err
