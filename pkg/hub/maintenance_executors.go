@@ -279,7 +279,6 @@ func (e *RebuildServerExecutor) Run(ctx context.Context, logger io.Writer, param
 		{"Building web assets", "make", []string{"web"}, repoPath},
 		{"Building server binary", "go", []string{"build", "-o", stagingBinary, "./cmd/scion"}, repoPath},
 		{"Installing server binary", "sudo", []string{"install", "-m", "755", stagingBinary, binaryDest}, ""},
-		{"Restarting service", "sudo", []string{"systemctl", "restart", serviceName}, ""},
 	}
 
 	for i, step := range steps {
@@ -303,8 +302,24 @@ func (e *RebuildServerExecutor) Run(ctx context.Context, logger io.Writer, param
 		fmt.Fprintln(logger)
 	}
 
-	log.Info("Server rebuild and restart complete")
-	fmt.Fprintln(logger, "Server rebuild and restart complete.")
+	// Fire-and-forget: start the restart but don't wait for it to finish.
+	// "systemctl restart" sends SIGTERM to this very process, so cmd.Run()
+	// would never return — it reports "signal: terminated". Using cmd.Start()
+	// lets us return success so the calling goroutine can persist the
+	// completed run status to the DB before the process is killed.
+	fmt.Fprintf(logger, "==> Restarting service\n")
+	log.Debug("Initiating service restart (fire-and-forget)",
+		"cmd", "sudo", "args", fmt.Sprintf("[systemctl restart %s]", serviceName))
+	restartCmd := exec.Command("sudo", "systemctl", "restart", serviceName)
+	restartCmd.Stdout = logger
+	restartCmd.Stderr = logger
+	if err := restartCmd.Start(); err != nil {
+		log.Error("Failed to initiate service restart", "error", err)
+		return fmt.Errorf("restarting service failed: %w", err)
+	}
+
+	log.Info("Server rebuild complete, restart initiated")
+	fmt.Fprintln(logger, "\nServer rebuild complete, restart initiated.")
 	return nil
 }
 

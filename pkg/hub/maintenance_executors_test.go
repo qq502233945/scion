@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/secret"
 	"github.com/GoogleCloudPlatform/scion/pkg/store/sqlite"
@@ -97,6 +98,10 @@ func TestRebuildServerExecutor_BuildsToStagingThenInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	// The restart step is fire-and-forget (cmd.Start), so give the async
+	// stub script a moment to write its log line before we read the file.
+	time.Sleep(100 * time.Millisecond)
 
 	logData, err := os.ReadFile(logFile)
 	if err != nil {
