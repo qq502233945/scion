@@ -89,6 +89,22 @@ func (m *AgentManager) Close() {
 }
 
 func (m *AgentManager) Stop(ctx context.Context, agentID string) error {
+	// Resolve the agent name to a container ID so that runtimes which do
+	// not support lookup-by-name (e.g. Apple's `container` CLI) receive
+	// the actual container ID.  This mirrors the resolution logic in Delete().
+	slug := api.Slugify(agentID)
+	agents, err := m.Runtime.List(ctx, map[string]string{"scion.name": slug})
+	if err == nil {
+		for _, a := range agents {
+			if a.Name == agentID || a.ContainerID == agentID ||
+				strings.TrimPrefix(a.Name, "/") == agentID ||
+				strings.EqualFold(a.Name, agentID) {
+				return m.Runtime.Stop(ctx, a.ContainerID)
+			}
+		}
+	}
+	// Fallback: agentID may already be a container ID, or the list
+	// failed — pass it through directly.
 	return m.Runtime.Stop(ctx, agentID)
 }
 

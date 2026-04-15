@@ -23,6 +23,77 @@ import (
 	"github.com/GoogleCloudPlatform/scion/pkg/runtime"
 )
 
+func TestStop_ResolvesNameToContainerID(t *testing.T) {
+	var stoppedID string
+
+	mock := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{
+				{Name: "test-agent", ContainerID: "abc123"},
+			}, nil
+		},
+		StopFunc: func(ctx context.Context, id string) error {
+			stoppedID = id
+			return nil
+		},
+	}
+
+	mgr := &AgentManager{Runtime: mock}
+	if err := mgr.Stop(context.Background(), "test-agent"); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+
+	if stoppedID != "abc123" {
+		t.Errorf("expected runtime.Stop to receive container ID abc123, got %s", stoppedID)
+	}
+}
+
+func TestStop_FallsBackToRawID(t *testing.T) {
+	var stoppedID string
+
+	mock := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{}, nil
+		},
+		StopFunc: func(ctx context.Context, id string) error {
+			stoppedID = id
+			return nil
+		},
+	}
+
+	mgr := &AgentManager{Runtime: mock}
+	if err := mgr.Stop(context.Background(), "unknown-agent"); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+
+	if stoppedID != "unknown-agent" {
+		t.Errorf("expected runtime.Stop to receive raw ID unknown-agent, got %s", stoppedID)
+	}
+}
+
+func TestStop_FallsBackOnListError(t *testing.T) {
+	var stoppedID string
+
+	mock := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return nil, fmt.Errorf("list failed")
+		},
+		StopFunc: func(ctx context.Context, id string) error {
+			stoppedID = id
+			return nil
+		},
+	}
+
+	mgr := &AgentManager{Runtime: mock}
+	if err := mgr.Stop(context.Background(), "my-agent"); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+
+	if stoppedID != "my-agent" {
+		t.Errorf("expected runtime.Stop to receive raw ID my-agent, got %s", stoppedID)
+	}
+}
+
 func TestDelete_StopsContainerBeforeRemoving(t *testing.T) {
 	var calls []string
 
