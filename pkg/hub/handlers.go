@@ -5327,17 +5327,12 @@ func (s *Server) enrichGroveOwnerNames(ctx context.Context, groves []store.Grove
 	}
 }
 
-// resolveUserGroveIDs returns grove IDs from the user's group memberships.
-// Groups with a non-empty GroveID represent grove membership.
+// resolveUserGroveIDs returns grove IDs from the user's group memberships,
+// including transitive memberships through nested groups.
 func (s *Server) resolveUserGroveIDs(ctx context.Context, userID string) []string {
-	memberships, err := s.store.GetUserGroups(ctx, userID)
-	if err != nil || len(memberships) == 0 {
+	groupIDs, err := s.store.GetEffectiveGroups(ctx, userID)
+	if err != nil || len(groupIDs) == 0 {
 		return nil
-	}
-
-	groupIDs := make([]string, 0, len(memberships))
-	for _, m := range memberships {
-		groupIDs = append(groupIDs, m.GroupID)
 	}
 
 	groups, err := s.store.GetGroupsByIDs(ctx, groupIDs)

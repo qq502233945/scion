@@ -1083,6 +1083,110 @@ func TestListGrovesSharedScope(t *testing.T) {
 	assert.Equal(t, 2, result.TotalCount)
 }
 
+func TestListGrovesSharedScopeTransitiveGroup(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	userID := "user_transitive"
+	otherOwnerID := api.NewUUID()
+
+	// Create a grove owned by someone else
+	sharedGrove := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Transitively Shared Grove",
+		Slug:       "trans-shared-grove",
+		OwnerID:    otherOwnerID,
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, sharedGrove))
+
+	// Create a grove_agents group linked to the grove (simulates the grove
+	// membership group that is created when a grove gains members).
+	groveGroup := &store.Group{
+		ID:        api.NewUUID(),
+		Name:      "Grove Agents",
+		Slug:      "grove-agents-trans",
+		GroupType: "grove_agents",
+		GroveID:   sharedGrove.ID,
+		Created:   time.Now(),
+		Updated:   time.Now(),
+	}
+	// Create an intermediate parent group that is a member of the grove group
+	parentGroup := &store.Group{
+		ID:      api.NewUUID(),
+		Name:    "Team Alpha",
+		Slug:    "team-alpha",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	// Create the child group the user is a direct member of
+	childGroup := &store.Group{
+		ID:      api.NewUUID(),
+		Name:    "Sub-Team",
+		Slug:    "sub-team",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+
+	for _, g := range []*store.Group{groveGroup, parentGroup, childGroup} {
+		require.NoError(t, s.CreateGroup(ctx, g))
+	}
+
+	// parentGroup is a member of groveGroup (admin access to the grove)
+	require.NoError(t, s.AddGroupMember(ctx, &store.GroupMember{
+		GroupID:    groveGroup.ID,
+		MemberType: "group",
+		MemberID:   parentGroup.ID,
+		Role:       "admin",
+		AddedAt:    time.Now(),
+	}))
+
+	// childGroup is a member of parentGroup
+	require.NoError(t, s.AddGroupMember(ctx, &store.GroupMember{
+		GroupID:    parentGroup.ID,
+		MemberType: "group",
+		MemberID:   childGroup.ID,
+		Role:       "member",
+		AddedAt:    time.Now(),
+	}))
+
+	// User is a direct member of childGroup only
+	require.NoError(t, s.AddGroupMember(ctx, &store.GroupMember{
+		GroupID:    childGroup.ID,
+		MemberType: "user",
+		MemberID:   userID,
+		Role:       "member",
+		AddedAt:    time.Now(),
+	}))
+
+	// GetEffectiveGroups should return all three groups (child, parent, grove)
+	effectiveGroupIDs, err := s.GetEffectiveGroups(ctx, userID)
+	require.NoError(t, err)
+	assert.Len(t, effectiveGroupIDs, 3)
+
+	// Resolve grove IDs from effective groups (mirrors resolveUserGroveIDs)
+	groups, err := s.GetGroupsByIDs(ctx, effectiveGroupIDs)
+	require.NoError(t, err)
+
+	var groveIDs []string
+	for _, g := range groups {
+		if g.GroveID != "" {
+			groveIDs = append(groveIDs, g.GroveID)
+		}
+	}
+	require.Len(t, groveIDs, 1, "should find grove via transitive group membership")
+	assert.Equal(t, sharedGrove.ID, groveIDs[0])
+
+	// Using the resolved grove IDs in a shared scope filter should return the grove
+	result, err := s.ListGroves(ctx, store.GroveFilter{
+		MemberGroveIDs: groveIDs,
+		ExcludeOwnerID: userID,
+	}, store.ListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.TotalCount)
+	assert.Equal(t, sharedGrove.ID, result.Items[0].ID)
+}
+
 func TestRuntimeBrokerLookupByName(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()

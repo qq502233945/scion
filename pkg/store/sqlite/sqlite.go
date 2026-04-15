@@ -4522,7 +4522,54 @@ func (s *SQLiteStore) CheckDelegatedAccess(ctx context.Context, agentID string, 
 // GetGroupsByIDs is a stub for the SQLite store. Group retrieval by IDs
 // is implemented in the Ent adapter.
 func (s *SQLiteStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store.Group, error) {
-	return nil, nil
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, slug, description, group_type, grove_id, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id
+		FROM groups WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []store.Group
+	for rows.Next() {
+		var g store.Group
+		var labels, annotations string
+		var parentID, groveID sql.NullString
+		if err := rows.Scan(
+			&g.ID, &g.Name, &g.Slug, &g.Description,
+			&g.GroupType, &groveID,
+			&parentID,
+			&labels, &annotations,
+			&g.Created, &g.Updated, &g.CreatedBy, &g.OwnerID,
+		); err != nil {
+			return nil, err
+		}
+		if parentID.Valid {
+			g.ParentID = parentID.String
+		}
+		if groveID.Valid {
+			g.GroveID = groveID.String
+		}
+		unmarshalJSON(labels, &g.Labels)
+		unmarshalJSON(annotations, &g.Annotations)
+		if g.GroupType == "" {
+			g.GroupType = store.GroupTypeExplicit
+		}
+		groups = append(groups, g)
+	}
+
+	return groups, rows.Err()
 }
 
 func (s *SQLiteStore) CountGroupMembersByRole(ctx context.Context, groupID, role string) (int, error) {
