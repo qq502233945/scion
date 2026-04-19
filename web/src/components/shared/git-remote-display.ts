@@ -75,6 +75,8 @@ export class ScionGitRemoteDisplay extends LitElement {
     if (sshMatch) return { url: `https://github.com/${sshMatch[1]}`, display: `github.com/${sshMatch[1]}` };
     const httpsMatch = remote.match(/^https?:\/\/(github\.com\/.+?)(?:\.git)?$/);
     if (httpsMatch) return { url: `https://${httpsMatch[1]}`, display: httpsMatch[1] };
+    const bareMatch = remote.match(/^(github\.com\/.+?)(?:\.git)?$/);
+    if (bareMatch) return { url: `https://${bareMatch[1]}`, display: bareMatch[1] };
     return null;
   }
 
