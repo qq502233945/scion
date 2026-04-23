@@ -8020,9 +8020,13 @@ func (s *Server) resolveTemplate(ctx context.Context, templateRef, groveID strin
 }
 
 // getHarnessConfigFromTemplate returns the harness config name from a resolved template,
-// or the fallback value if no template was resolved.
+// or the fallback value if no template was resolved. Prefers the template's
+// DefaultHarnessConfig (e.g. "claude-web") over the generic Harness type (e.g. "claude").
 func (s *Server) getHarnessConfigFromTemplate(template *store.Template, fallback string) string {
 	if template != nil {
+		if template.DefaultHarnessConfig != "" {
+			return template.DefaultHarnessConfig
+		}
 		if template.Harness != "" {
 			return template.Harness
 		}
